@@ -1,0 +1,252 @@
+{
+  "comment": "SignalK Example Data Structures",
+  
+  "discovery_response": {
+    "endpoints": {
+      "v1": {
+        "version": "1.0.0",
+        "signalk-http": "http://192.168.1.100/signalk/v1/api/",
+        "signalk-ws": "ws://192.168.1.100/signalk/v1/stream"
+      }
+    },
+    "server": {
+      "id": "ESP32-SignalK",
+      "version": "1.0.0"
+    }
+  },
+
+  "api_root_response": {
+    "name": "ESP32-SignalK",
+    "version": "1.0.0",
+    "self": "vessels.urn:mrn:signalk:uuid:12345678-1234-1234-1234-123456789abc"
+  },
+
+  "vessels_self_full": {
+    "uuid": "urn:mrn:signalk:uuid:12345678-1234-1234-1234-123456789abc",
+    "name": "ESP32-SignalK",
+    "navigation": {
+      "position": {
+        "value": {
+          "latitude": 37.9838,
+          "longitude": 23.7275
+        },
+        "timestamp": "2025-01-15T10:30:45.000Z",
+        "meta": {
+          "units": "deg",
+          "description": "GPS Position"
+        },
+        "$source": {
+          "label": "nmea0183.GPS"
+        }
+      },
+      "speedOverGround": {
+        "value": 5.1444,
+        "timestamp": "2025-01-15T10:30:45.000Z",
+        "meta": {
+          "units": "m/s",
+          "description": "Speed over ground"
+        },
+        "$source": {
+          "label": "nmea0183.GPS"
+        }
+      },
+      "courseOverGroundTrue": {
+        "value": 1.5708,
+        "timestamp": "2025-01-15T10:30:45.000Z",
+        "meta": {
+          "units": "rad",
+          "description": "Course over ground (true)"
+        },
+        "$source": {
+          "label": "nmea0183.GPS"
+        }
+      },
+      "headingMagnetic": {
+        "value": 1.3963,
+        "timestamp": "2025-01-15T10:30:45.000Z",
+        "meta": {
+          "units": "rad",
+          "description": "Heading (magnetic)"
+        },
+        "$source": {
+          "label": "nmea0183.GPS"
+        }
+      },
+      "gnss": {
+        "altitude": {
+          "value": 10.5,
+          "timestamp": "2025-01-15T10:30:45.000Z",
+          "meta": {
+            "units": "m",
+            "description": "Altitude"
+          },
+          "$source": {
+            "label": "nmea0183.GPS"
+          }
+        },
+        "satellitesInView": {
+          "value": 12,
+          "timestamp": "2025-01-15T10:30:45.000Z",
+          "meta": {
+            "description": "Satellites in view"
+          },
+          "$source": {
+            "label": "nmea0183.GPS"
+          }
+        }
+      }
+    }
+  },
+
+  "websocket_hello": {
+    "self": "vessels.urn:mrn:signalk:uuid:12345678-1234-1234-1234-123456789abc",
+    "version": "1.0.0",
+    "timestamp": "2025-01-15T10:30:45.000Z"
+  },
+
+  "websocket_subscribe_message": {
+    "context": "vessels.self",
+    "subscribe": [
+      {
+        "path": "navigation.*",
+        "period": 1000,
+        "format": "delta",
+        "policy": "instant"
+      }
+    ]
+  },
+
+  "websocket_subscribe_all": {
+    "context": "*",
+    "subscribe": [
+      {
+        "path": "*",
+        "period": 1000
+      }
+    ]
+  },
+
+  "websocket_unsubscribe_message": {
+    "context": "vessels.self",
+    "unsubscribe": [
+      {
+        "path": "navigation.speedOverGround"
+      }
+    ]
+  },
+
+  "websocket_delta_message": {
+    "context": "vessels.urn:mrn:signalk:uuid:12345678-1234-1234-1234-123456789abc",
+    "updates": [
+      {
+        "timestamp": "2025-01-15T10:30:45.123Z",
+        "source": {
+          "label": "ESP32-SignalK",
+          "type": "NMEA0183"
+        },
+        "values": [
+          {
+            "path": "navigation.position.latitude",
+            "value": 37.9838
+          },
+          {
+            "path": "navigation.position.longitude",
+            "value": 23.7275
+          },
+          {
+            "path": "navigation.speedOverGround",
+            "value": 5.1444
+          },
+          {
+            "path": "navigation.courseOverGroundTrue",
+            "value": 1.5708
+          }
+        ]
+      }
+    ]
+  },
+
+  "websocket_delta_single_value": {
+    "context": "vessels.self",
+    "updates": [
+      {
+        "timestamp": "2025-01-15T10:30:46.000Z",
+        "source": {
+          "label": "nmea0183.GPS"
+        },
+        "values": [
+          {
+            "path": "navigation.speedOverGround",
+            "value": 5.2
+          }
+        ]
+      }
+    ]
+  },
+
+  "put_value_request": {
+    "value": 45.5
+  },
+
+  "put_value_response_success": {
+    "state": "COMPLETED",
+    "statusCode": 200
+  },
+
+  "put_value_response_error": {
+    "state": "COMPLETED",
+    "statusCode": 401,
+    "message": "Unauthorized"
+  },
+
+  "token_list_response": [
+    {
+      "token": "abc123def456ghi789jkl012mno345pq",
+      "role": "admin"
+    },
+    {
+      "token": "xyz789uvw456rst123opq890lmn567ab",
+      "role": "readonly"
+    }
+  ],
+
+  "create_token_request": {
+    "role": "readonly"
+  },
+
+  "create_token_response": {
+    "token": "newtoken123456789abcdefghijklmnop",
+    "role": "readonly"
+  },
+
+  "example_nmea_sentences": {
+    "RMC": "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A",
+    "GGA": "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47",
+    "VTG": "$GPVTG,054.7,T,034.4,M,005.5,N,010.2,K*48",
+    "HDG": "$HCHDG,98.3,0.0,E,12.6,W*3C"
+  },
+
+  "example_custom_paths": {
+    "electrical.batteries.house.voltage": 12.6,
+    "electrical.batteries.house.current": 15.3,
+    "electrical.solar.power": 250.5,
+    "environment.water.temperature": 18.5,
+    "environment.depth.belowTransducer": 8.2,
+    "environment.wind.speedTrue": 8.5,
+    "environment.wind.angleTrue": 0.785398,
+    "propulsion.engine.temperature": 85.5,
+    "propulsion.engine.rpm": 1800,
+    "tanks.fuel.level": 0.75,
+    "tanks.freshWater.level": 0.60
+  },
+
+  "curl_examples": {
+    "discovery": "curl http://192.168.1.100/signalk",
+    "api_root": "curl http://192.168.1.100/signalk/v1/api/",
+    "vessels_self": "curl http://192.168.1.100/signalk/v1/api/vessels/self",
+    "get_position": "curl http://192.168.1.100/signalk/v1/api/vessels/self/navigation/position",
+    "put_value": "curl -X PUT -H 'Authorization: Bearer YOUR_TOKEN' -H 'Content-Type: application/json' -d '{\"value\":45.5}' http://192.168.1.100/signalk/v1/api/vessels/self/custom/myvalue",
+    "list_tokens": "curl -H 'Authorization: Bearer ADMIN_TOKEN' http://192.168.1.100/admin/tokens",
+    "create_token": "curl -X POST -H 'Authorization: Bearer ADMIN_TOKEN' -H 'Content-Type: application/json' -d '{\"role\":\"readonly\"}' http://192.168.1.100/admin/tokens"
+  }
+}

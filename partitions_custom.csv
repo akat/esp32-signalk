@@ -1,0 +1,21 @@
+# Name,   Type, SubType, Offset,  Size,     Flags
+# ESP32 Custom Partition Table for SignalK Server
+# Total: 4MB Flash
+
+# NVS - Non-Volatile Storage (for WiFi, settings, tokens)
+nvs,      data, nvs,     0x9000,  0x6000,
+
+# OTA Data - for OTA updates
+otadata,  data, ota,     0xF000,  0x2000,
+
+# App0 - Main application partition
+app0,     app,  ota_0,   0x10000, 0x1E0000,
+
+# App1 - OTA update partition
+app1,     app,  ota_1,   0x1F0000,0x1E0000,
+
+# SPIFFS - File system (for web files, logs, configs)
+spiffs,   data, spiffs,  0x3D0000,0x2B000,
+
+# coredump - Core dump partition (for debugging crashes)
+coredump, data, coredump,0x3FB000,0x5000,
