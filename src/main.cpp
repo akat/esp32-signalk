@@ -20,6 +20,7 @@
 #include <AsyncTCP.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <algorithm>
 #include <vector>
 #include <map>
 #include <set>
@@ -29,7 +30,7 @@
 #define NMEA_TX 17
 #define NMEA_BAUD 4800
 
-#define WS_DELTA_MIN_MS 100        // Minimum delta broadcast interval
+#define WS_DELTA_MIN_MS 1000       // Minimum delta broadcast interval (1 second)
 #define WS_CLEANUP_MS 5000         // WebSocket cleanup interval
 
 // TCP Client Configuration
@@ -74,7 +75,9 @@ struct PathValue {
   JsonVariant value;
   String strValue;      // For string storage
   double numValue;
-  bool isNumeric;
+  bool isNumeric = false;
+  bool isJson = false;
+  String jsonValue;
   String timestamp;     // ISO8601
   String source;        // e.g., "nmea0183.GPS"
   
@@ -93,7 +96,7 @@ struct ClientSubscription {
   std::set<String> paths;
   uint32_t minPeriod;
   String format; // "delta" or "full"
-  uint32_t lastSend;
+  uint32_t lastSend = 0;
 };
 
 std::map<uint32_t, ClientSubscription> clientSubscriptions; // clientId -> subscription
@@ -139,6 +142,8 @@ void setPathValue(const String& path, double value, const String& source = "nmea
   PathValue& pv = dataStore[path];
   pv.numValue = value;
   pv.isNumeric = true;
+  pv.isJson = false;
+  pv.jsonValue = "";
   pv.timestamp = iso8601Now();
   pv.source = source;
   pv.units = units;
@@ -158,6 +163,8 @@ void setPathValue(const String& path, const String& value, const String& source 
   PathValue& pv = dataStore[path];
   pv.strValue = value;
   pv.isNumeric = false;
+  pv.isJson = false;
+  pv.jsonValue = "";
   pv.timestamp = iso8601Now();
   pv.source = source;
   pv.units = units;
@@ -169,6 +176,39 @@ void setPathValue(const String& path, const String& value, const String& source 
       pv.changed = false;
     }
   }
+}
+
+void setPathValueJson(const String& path, const String& jsonValue, const String& source = "nmea0183.GPS",
+                      const String& units = "", const String& description = "") {
+  PathValue& pv = dataStore[path];
+  pv.isNumeric = false;
+  pv.isJson = true;
+  pv.jsonValue = jsonValue;
+  pv.timestamp = iso8601Now();
+  pv.source = source;
+  pv.units = units;
+  pv.description = description;
+  pv.changed = true;
+
+  if (lastSentValues.count(path) > 0) {
+    if (lastSentValues[path].jsonValue == jsonValue) {
+      pv.changed = false;
+    }
+  }
+}
+
+void updateNavigationPosition(double lat, double lon, const String& source = "nmea0183.GPS") {
+  if (isnan(lat) || isnan(lon)) {
+    return;
+  }
+
+  DynamicJsonDocument doc(128);
+  doc["latitude"] = lat;
+  doc["longitude"] = lon;
+
+  String json;
+  serializeJson(doc, json);
+  setPathValueJson("navigation.position", json, source, "", "Vessel position");
 }
 
 // ====== NMEA PARSING ======
@@ -236,6 +276,7 @@ void parseNMEASentence(const String& sentence) {
       
       setPathValue("navigation.position.latitude", lat, "nmea0183.GPS", "deg", "Latitude");
       setPathValue("navigation.position.longitude", lon, "nmea0183.GPS", "deg", "Longitude");
+      updateNavigationPosition(lat, lon);
     }
     
     if (!isnan(sog) && sog >= 0) {
@@ -267,6 +308,7 @@ void parseNMEASentence(const String& sentence) {
       setPathValue("navigation.position.latitude", lat, "nmea0183.GPS", "deg", "Latitude");
       setPathValue("navigation.position.longitude", lon, "nmea0183.GPS", "deg", "Longitude");
       setPathValue("navigation.gnss.satellitesInView", (double)sats, "nmea0183.GPS", "", "Satellites in view");
+      updateNavigationPosition(lat, lon);
     }
     
     if (!isnan(alt)) {
@@ -315,6 +357,7 @@ void parseNMEASentence(const String& sentence) {
 
       setPathValue("navigation.position.latitude", lat, "nmea0183.GPS", "deg", "Latitude");
       setPathValue("navigation.position.longitude", lon, "nmea0183.GPS", "deg", "Longitude");
+      updateNavigationPosition(lat, lon);
     }
   }
 
@@ -532,7 +575,15 @@ void broadcastDeltas() {
     JsonObject val = values.createNestedObject();
     val["path"] = kv.first;
     
-    if (kv.second.isNumeric) {
+    if (kv.second.isJson) {
+      DynamicJsonDocument valueDoc(256);
+      DeserializationError err = deserializeJson(valueDoc, kv.second.jsonValue);
+      if (!err) {
+        val["value"] = valueDoc.as<JsonVariant>();
+      } else {
+        val["value"] = kv.second.jsonValue;
+      }
+    } else if (kv.second.isNumeric) {
       val["value"] = kv.second.numValue;
     } else {
       val["value"] = kv.second.strValue;
@@ -548,9 +599,29 @@ void broadcastDeltas() {
   
   String output;
   serializeJson(doc, output);
-  
-  // Send to all connected clients
-  ws.textAll(output);
+
+  if (clientSubscriptions.empty()) {
+    // Legacy behavior: broadcast to everyone when no one negotiated subscriptions
+    ws.textAll(output);
+    return;
+  }
+
+  // Send only to clients whose throttle window has elapsed
+  for (auto it = clientSubscriptions.begin(); it != clientSubscriptions.end();) {
+    AsyncWebSocketClient* client = ws.client(it->first);
+    if (!client) {
+      it = clientSubscriptions.erase(it);
+      continue;
+    }
+
+    ClientSubscription& sub = it->second;
+    uint32_t effectivePeriod = std::max(sub.minPeriod, (uint32_t)WS_DELTA_MIN_MS);
+    if (now - sub.lastSend >= effectivePeriod) {
+      client->text(output);
+      sub.lastSend = now;
+    }
+    ++it;
+  }
 }
 
 // ====== WEBSOCKET EVENT HANDLER ======
@@ -1289,14 +1360,7 @@ void processTcpData() {
       if (tcpBuffer.length() > 6 && tcpBuffer[0] == '$') {
         // This is an NMEA sentence - parse it
         Serial.println("TCP NMEA: " + tcpBuffer);
-
-        // Modify the source to indicate it's from TCP
-        // Save original source temporarily if needed
         parseNMEASentence(tcpBuffer);
-
-        // Mark the paths as coming from TCP
-        // Note: parseNMEASentence sets source as "nmea0183.GPS"
-        // We could enhance this later to set source as "tcp.nmea0183"
       }
       tcpBuffer = "";
     } else if (c >= 32 && c <= 126) {
