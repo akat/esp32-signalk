@@ -116,6 +116,16 @@ struct ClientSubscription {
 
 std::map<uint32_t, ClientSubscription> clientSubscriptions; // clientId -> subscription
 
+// ====== ACCESS REQUESTS ======
+// Storage for access requests (for polling)
+struct AccessRequestData {
+  String clientId;
+  String description;
+  String token;
+  String state; // "PENDING" or "COMPLETED"
+};
+std::map<String, AccessRequestData> accessRequests;
+
 // ====== NMEA STATE ======
 struct GPSData {
   double lat = NAN;
@@ -128,6 +138,39 @@ struct GPSData {
   String fixQuality;
   String timestamp;
 } gpsData;
+
+// ====== GEOFENCE & ALARMS ======
+// Geofence configuration
+struct GeofenceConfig {
+  bool enabled = false;
+  double anchorLat = NAN;
+  double anchorLon = NAN;
+  double radius = 100.0;  // meters
+  uint32_t anchorTimestamp = 0;
+  bool alarmActive = false;
+  double lastDistance = NAN;
+} geofence;
+
+// Depth alarm configuration
+struct DepthAlarmConfig {
+  bool enabled = false;
+  double threshold = 2.0;  // meters
+  bool alarmActive = false;
+  double lastDepth = NAN;
+  uint32_t lastSampleTime = 0;
+} depthAlarm;
+
+// Wind alarm configuration
+struct WindAlarmConfig {
+  bool enabled = false;
+  double threshold = 20.0;  // knots
+  bool alarmActive = false;
+  double lastWind = NAN;
+  uint32_t lastSampleTime = 0;
+} windAlarm;
+
+// SignalK Notifications storage
+std::map<String, String> notifications; // path -> state ("alarm", "warn", "alert", "normal")
 
 // ====== UTILITY FUNCTIONS ======
 String generateUUID() {
@@ -149,7 +192,27 @@ String iso8601Now() {
 }
 
 double knotsToMS(double knots) { return knots * 0.514444; }
+double msToKnots(double ms) { return ms / 0.514444; }
 double degToRad(double deg) { return deg * M_PI / 180.0; }
+
+// Haversine distance calculation (returns meters)
+double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
+  const double R = 6371000.0; // Earth radius in meters
+  const double toRad = M_PI / 180.0;
+
+  double dLat = (lat2 - lat1) * toRad;
+  double dLon = (lon2 - lon1) * toRad;
+  double a = sin(dLat/2) * sin(dLat/2) +
+             cos(lat1 * toRad) * cos(lat2 * toRad) *
+             sin(dLon/2) * sin(dLon/2);
+  double c = 2 * atan2(sqrt(a), sqrt(1-a));
+  return R * c;
+}
+
+// Forward declarations
+void updateGeofence();
+void updateDepthAlarm(double depth);
+void updateWindAlarm(double windSpeedMS);
 
 // ====== PATH OPERATIONS ======
 void setPathValue(const String& path, double value, const String& source = "nmea0183.GPS",
@@ -197,6 +260,28 @@ void setPathValueJson(const String& path, const String& jsonValue, const String&
   pv.description = description;
   pv.changed = true;
 
+  // Persist important configuration paths to flash
+  if (path == "navigation.anchor.akat") {
+    Serial.printf("Attempting to persist %d bytes to flash\n", jsonValue.length());
+
+    if (jsonValue.length() > 1900) {
+      Serial.println("WARNING: JSON too large for NVS, truncating may occur");
+    }
+
+    prefs.begin("signalk", false);
+    size_t written = prefs.putString("anchor.akat", jsonValue);
+
+    // Verify it was written
+    String readBack = prefs.getString("anchor.akat", "");
+    prefs.end();
+
+    if (written > 0 && readBack == jsonValue) {
+      Serial.printf("SUCCESS: Persisted %d bytes to flash and verified\n", written);
+    } else {
+      Serial.printf("ERROR: Failed to persist (wrote %d bytes, readback length %d)\n", written, readBack.length());
+    }
+  }
+
   // Always mark as changed - let the WebSocket throttling handle update frequency
 }
 
@@ -213,12 +298,166 @@ void updateNavigationPosition(double lat, double lon, const String& source = "nm
   String json;
   serializeJson(doc, json);
 
-  Serial.println("=== Position Update ===");
-  Serial.printf("Lat: %.6f, Lon: %.6f\n", lat, lon);
-  Serial.println("JSON: " + json);
-  Serial.println("======================");
+  // Serial.println("=== Position Update ===");
+  // Serial.printf("Lat: %.6f, Lon: %.6f\n", lat, lon);
+  // Serial.println("JSON: " + json);
+  // Serial.println("======================");
 
   setPathValueJson("navigation.position", json, source, "", "Vessel position");
+
+  // Trigger geofence monitoring
+  updateGeofence();
+}
+
+// ====== SIGNALK NOTIFICATIONS ======
+void setNotification(const String& path, const String& state, const String& message) {
+  notifications[path] = state;
+
+  // Build notification object
+  DynamicJsonDocument doc(512);
+  doc["state"] = state;
+  doc["method"] = "visual";
+  doc["timestamp"] = iso8601Now();
+  doc["message"] = message;
+
+  String json;
+  serializeJson(doc, json);
+
+  // Store in dataStore with special prefix
+  setPathValueJson("notifications." + path, json, "esp32.alarms", "", "Alarm notification");
+
+  Serial.printf("Notification: %s -> %s: %s\n", path.c_str(), state.c_str(), message.c_str());
+}
+
+void clearNotification(const String& path) {
+  setNotification(path, "normal", "");
+}
+
+// ====== GEOFENCE MONITORING ======
+void updateGeofence() {
+  if (!geofence.enabled) {
+    if (geofence.alarmActive) {
+      clearNotification("geofence.exit");
+      geofence.alarmActive = false;
+    }
+    return;
+  }
+
+  // Need valid anchor and current position
+  if (isnan(geofence.anchorLat) || isnan(geofence.anchorLon)) {
+    return;
+  }
+  if (isnan(gpsData.lat) || isnan(gpsData.lon)) {
+    return;
+  }
+
+  // Calculate distance
+  double distance = haversineDistance(gpsData.lat, gpsData.lon,
+                                       geofence.anchorLat, geofence.anchorLon);
+  geofence.lastDistance = distance;
+
+  // Check if outside geofence
+  bool outside = distance > geofence.radius;
+
+  if (outside && !geofence.alarmActive) {
+    // Trigger alarm
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Vessel left geofence: %.0f m (> %.0f m)", distance, geofence.radius);
+    setNotification("geofence.exit", "alarm", String(msg));
+    geofence.alarmActive = true;
+    Serial.printf("GEOFENCE ALARM: %s\n", msg);
+  } else if (!outside && geofence.alarmActive) {
+    // Clear alarm
+    clearNotification("geofence.exit");
+    geofence.alarmActive = false;
+    Serial.println("Geofence: Back inside");
+  }
+
+  // Update status in dataStore for dashboard
+  DynamicJsonDocument statusDoc(256);
+  statusDoc["enabled"] = geofence.enabled;
+  statusDoc["radius"] = geofence.radius;
+  statusDoc["distance"] = round(distance);
+  statusDoc["inside"] = !outside;
+  if (!isnan(geofence.anchorLat)) {
+    statusDoc["anchor"]["lat"] = geofence.anchorLat;
+    statusDoc["anchor"]["lon"] = geofence.anchorLon;
+  }
+  String statusJson;
+  serializeJson(statusDoc, statusJson);
+  setPathValueJson("navigation.anchor.status", statusJson, "esp32.geofence", "", "Geofence status");
+}
+
+// ====== DEPTH ALARM MONITORING ======
+void updateDepthAlarm(double depth) {
+  depthAlarm.lastDepth = depth;
+  depthAlarm.lastSampleTime = millis();
+
+  if (!depthAlarm.enabled) {
+    if (depthAlarm.alarmActive) {
+      clearNotification("depth.alarm");
+      depthAlarm.alarmActive = false;
+    }
+    return;
+  }
+
+  if (isnan(depth)) {
+    return;
+  }
+
+  bool triggered = depth <= depthAlarm.threshold;
+
+  if (triggered && !depthAlarm.alarmActive) {
+    // Trigger alarm
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Depth %.1f m (limit %.1f m)", depth, depthAlarm.threshold);
+    setNotification("depth.alarm", "alarm", String(msg));
+    depthAlarm.alarmActive = true;
+    Serial.printf("DEPTH ALARM: %s\n", msg);
+  } else if (!triggered && depthAlarm.alarmActive) {
+    // Clear alarm
+    clearNotification("depth.alarm");
+    depthAlarm.alarmActive = false;
+    Serial.println("Depth: Back to normal");
+  }
+}
+
+// ====== WIND ALARM MONITORING ======
+void updateWindAlarm(double windSpeedMS) {
+  const double RESET_HYSTERESIS_KNOTS = 1.0;
+
+  // Convert m/s to knots
+  double windKnots = msToKnots(windSpeedMS);
+  windAlarm.lastWind = windKnots;
+  windAlarm.lastSampleTime = millis();
+
+  if (!windAlarm.enabled) {
+    if (windAlarm.alarmActive) {
+      clearNotification("wind.alarm");
+      windAlarm.alarmActive = false;
+    }
+    return;
+  }
+
+  if (isnan(windSpeedMS)) {
+    return;
+  }
+
+  bool triggered = windKnots >= windAlarm.threshold;
+
+  if (triggered && !windAlarm.alarmActive) {
+    // Trigger alarm
+    char msg[128];
+    snprintf(msg, sizeof(msg), "True wind %.1f kn (limit %.1f kn)", windKnots, windAlarm.threshold);
+    setNotification("wind.alarm", "alarm", String(msg));
+    windAlarm.alarmActive = true;
+    Serial.printf("WIND ALARM: %s\n", msg);
+  } else if (windAlarm.alarmActive && windKnots <= (windAlarm.threshold - RESET_HYSTERESIS_KNOTS)) {
+    // Clear alarm with hysteresis
+    clearNotification("wind.alarm");
+    windAlarm.alarmActive = false;
+    Serial.println("Wind: Back below threshold");
+  }
 }
 
 // ====== NMEA PARSING ======
@@ -265,9 +504,9 @@ double nmeaCoordToDec(const String& coord, const String& hemisphere) {
   double minutes = minStr.toDouble();
   double decimal = degrees + (minutes / 60.0);
 
-  Serial.printf("Coord: %s, Hemisphere: %s\n", coord.c_str(), hemisphere.c_str());
-  Serial.printf("  Degrees: %s = %.2f, Minutes: %s = %.6f\n", degStr.c_str(), degrees, minStr.c_str(), minutes);
-  Serial.printf("  Result: %.6f\n", decimal);
+  // Serial.printf("Coord: %s, Hemisphere: %s\n", coord.c_str(), hemisphere.c_str());
+  // Serial.printf("  Degrees: %s = %.2f, Minutes: %s = %.6f\n", degStr.c_str(), degrees, minStr.c_str(), minutes);
+  // Serial.printf("  Result: %.6f\n", decimal);
 
   if (hemisphere == "S" || hemisphere == "W") {
     decimal = -decimal;
@@ -441,6 +680,8 @@ void parseNMEASentence(const String& sentence) {
     }
     if (!isnan(windSpeedMs) && windSpeedMs >= 0) {
       setPathValue("environment.wind.speedTrue", windSpeedMs, "nmea0183.GPS", "m/s", "Wind speed (true)");
+      // Trigger wind alarm monitoring
+      updateWindAlarm(windSpeedMs);
     }
   }
 
@@ -504,6 +745,8 @@ void parseNMEASentence(const String& sentence) {
         // True wind
         setPathValue("environment.wind.angleTrueWater", degToRad(windAngle), "nmea0183.GPS", "rad", "True wind angle");
         setPathValue("environment.wind.speedTrue", windSpeedMs, "nmea0183.GPS", "m/s", "True wind speed");
+        // Trigger wind alarm monitoring
+        updateWindAlarm(windSpeedMs);
       }
     }
   }
@@ -519,6 +762,8 @@ void parseNMEASentence(const String& sentence) {
 
     if (!isnan(windSpeedMs) && windSpeedMs >= 0) {
       setPathValue("environment.wind.speedTrue", windSpeedMs, "nmea0183.GPS", "m/s", "True wind speed");
+      // Trigger wind alarm monitoring
+      updateWindAlarm(windSpeedMs);
     }
 
     // Use left wind angle if available, otherwise right
@@ -578,6 +823,8 @@ void parseNMEASentence(const String& sentence) {
 
     if (!isnan(depth) && depth >= 0) {
       setPathValue("environment.depth.belowTransducer", depth, "nmea0183.GPS", "m", "Depth below transducer");
+      // Trigger depth alarm monitoring
+      updateDepthAlarm(depth);
     }
   }
 
@@ -675,18 +922,123 @@ void broadcastDeltas() {
 
 // ====== WEBSOCKET EVENT HANDLER ======
 void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t len) {
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, data, len);
-  
+
   if (error) {
     Serial.println("WS: Invalid JSON");
     return;
   }
-  
+
   String context = doc["context"] | "";
   String subscribe = doc["subscribe"] | "";
   String unsubscribe = doc["unsubscribe"] | "";
-  
+
+  // Handle incoming delta updates from clients (like 6pack app)
+  if (doc.containsKey("updates")) {
+    Serial.println("\n=== WS: Received delta update from client ===");
+    String debugMsg;
+    serializeJsonPretty(doc, debugMsg);
+    Serial.println(debugMsg);
+
+    JsonArray updates = doc["updates"];
+    for (JsonVariant updateVar : updates) {
+      JsonObject update = updateVar.as<JsonObject>();
+      if (!update.containsKey("values")) continue;
+
+      JsonArray values = update["values"];
+      for (JsonVariant valueVar : values) {
+        JsonObject valueObj = valueVar.as<JsonObject>();
+        String path = valueObj["path"] | "";
+
+        if (path.length() == 0) continue;
+
+        // Handle path conversion
+        String fullPath = path;
+        if (fullPath.startsWith("vessels.self.")) {
+          // Remove "vessels.self." prefix
+          fullPath.replace("vessels.self.", "");
+        } else if (fullPath.startsWith("vessels." + vesselUUID + ".")) {
+          // Remove "vessels.<uuid>." prefix
+          fullPath.replace("vessels." + vesselUUID + ".", "");
+        }
+        // If path doesn't start with a known prefix like "navigation.", "environment.", etc.
+        // then it's likely a relative path and needs no modification
+        // The path from 6pack already includes the full path like "navigation.anchor.akat"
+
+        Serial.printf("WS: Processing delta path: %s -> %s\n", path.c_str(), fullPath.c_str());
+
+        JsonVariant value = valueObj["value"];
+        String source = update["source"] | "app";
+
+        // Store the value based on type
+        if (value.is<JsonObject>() || value.is<JsonArray>()) {
+          String jsonStr;
+          serializeJson(value, jsonStr);
+          setPathValueJson(fullPath, jsonStr, source, "", "WebSocket update");
+          Serial.printf("WS: Stored JSON value for path: %s\n", fullPath.c_str());
+
+          // Special handling for navigation.anchor.akat (6pack app config)
+          if (fullPath == "navigation.anchor.akat" && value.is<JsonObject>()) {
+            JsonObject obj = value.as<JsonObject>();
+
+            // Extract anchor position
+            if (obj.containsKey("anchor")) {
+              JsonObject anchor = obj["anchor"];
+              if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
+                geofence.anchorLat = anchor["lat"];
+                geofence.anchorLon = anchor["lon"];
+                geofence.anchorTimestamp = millis();
+                Serial.printf("WS: Anchor set: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
+              }
+              if (anchor.containsKey("radius")) {
+                geofence.radius = anchor["radius"];
+                Serial.printf("WS: Geofence radius: %.0f m\n", geofence.radius);
+              }
+              if (anchor.containsKey("enabled")) {
+                geofence.enabled = anchor["enabled"];
+                Serial.printf("WS: Geofence enabled: %s\n", geofence.enabled ? "true" : "false");
+              }
+            }
+
+            // Extract depth alarm config
+            if (obj.containsKey("depth")) {
+              JsonObject depth = obj["depth"];
+              if (depth.containsKey("min_depth")) {
+                depthAlarm.threshold = depth["min_depth"];
+                Serial.printf("WS: Depth threshold: %.1f m\n", depthAlarm.threshold);
+              }
+              if (depth.containsKey("alarm")) {
+                depthAlarm.enabled = depth["alarm"];
+                Serial.printf("WS: Depth alarm enabled: %s\n", depthAlarm.enabled ? "true" : "false");
+              }
+            }
+
+            // Extract wind alarm config
+            if (obj.containsKey("wind")) {
+              JsonObject wind = obj["wind"];
+              if (wind.containsKey("max_speed")) {
+                windAlarm.threshold = wind["max_speed"];
+                Serial.printf("WS: Wind threshold: %.1f kn\n", windAlarm.threshold);
+              }
+              if (wind.containsKey("alarm")) {
+                windAlarm.enabled = wind["alarm"];
+                Serial.printf("WS: Wind alarm enabled: %s\n", windAlarm.enabled ? "true" : "false");
+              }
+            }
+          }
+        } else if (value.is<double>() || value.is<int>() || value.is<float>()) {
+          setPathValue(fullPath, value.as<double>(), source, "", "WebSocket update");
+        } else if (value.is<bool>()) {
+          setPathValue(fullPath, value.as<bool>() ? 1.0 : 0.0, source, "", "WebSocket update");
+        } else if (value.is<const char*>()) {
+          setPathValue(fullPath, String(value.as<const char*>()), source, "", "WebSocket update");
+        }
+      }
+    }
+    return;
+  }
+
   // Handle subscription
   if (doc.containsKey("subscribe")) {
     JsonArray subArray = doc["subscribe"].as<JsonArray>();
@@ -707,16 +1059,63 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     }
 
     sub.format = doc["format"] | "delta";
-    
+
     // Send hello message
     DynamicJsonDocument hello(512);
     hello["self"] = "vessels." + vesselUUID;
     hello["version"] = "1.0.0";
     hello["timestamp"] = iso8601Now();
-    
-    String output;
-    serializeJson(hello, output);
-    client->text(output);
+
+    String helloOutput;
+    serializeJson(hello, helloOutput);
+    client->text(helloOutput);
+
+    // Send initial state for all subscribed paths
+    DynamicJsonDocument initialDoc(4096);
+    initialDoc["context"] = "vessels." + vesselUUID;
+
+    JsonArray updates = initialDoc.createNestedArray("updates");
+    JsonObject update = updates.createNestedObject();
+    update["timestamp"] = iso8601Now();
+
+    JsonObject source = update.createNestedObject("source");
+    source["label"] = "ESP32-SignalK";
+
+    JsonArray values = update.createNestedArray("values");
+    bool hasData = false;
+
+    // Send current values for subscribed paths
+    for (auto& kv : dataStore) {
+      // Check if this path is subscribed
+      if (sub.paths.count(kv.first) == 0 && sub.paths.count("*") == 0) {
+        continue;
+      }
+
+      hasData = true;
+      JsonObject val = values.createNestedObject();
+      val["path"] = kv.first;
+
+      if (kv.second.isJson) {
+        DynamicJsonDocument valueDoc(512);
+        DeserializationError err = deserializeJson(valueDoc, kv.second.jsonValue);
+        if (!err) {
+          val["value"] = valueDoc.as<JsonVariant>();
+        } else {
+          val["value"] = kv.second.jsonValue;
+        }
+      } else if (kv.second.isNumeric) {
+        val["value"] = kv.second.numValue;
+      } else {
+        val["value"] = kv.second.strValue;
+      }
+    }
+
+    if (hasData) {
+      String initialOutput;
+      serializeJson(initialDoc, initialOutput);
+      client->text(initialOutput);
+      Serial.printf("Sent initial state with %d values to client #%u\n", values.size(), client->id());
+    }
   }
   
   // Handle unsubscribe
@@ -734,22 +1133,56 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
   }
 }
 
-void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, 
+void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                      AwsEventType type, void* arg, uint8_t* data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
-      Serial.printf("WS: Client #%u connected\n", client->id());
+      Serial.println("\n========================================");
+      Serial.println("=== WEBSOCKET: NEW CONNECTION ===");
+      Serial.printf("Client ID: #%u\n", client->id());
+      Serial.printf("Client IP: %s\n", client->remoteIP().toString().c_str());
+      Serial.printf("Server: %s\n", server->url());
+      Serial.println("STATUS: CONNECTED SUCCESSFULLY");
+
+      // Send hello message immediately
+      {
+        DynamicJsonDocument helloDoc(512);
+        helloDoc["self"] = "vessels." + vesselUUID;
+        helloDoc["version"] = "1.7.0";
+        helloDoc["timestamp"] = iso8601Now();
+
+        JsonObject serverInfo = helloDoc.createNestedObject("server");
+        serverInfo["id"] = serverName;
+        serverInfo["version"] = "1.0.0";
+
+        String helloMsg;
+        serializeJson(helloDoc, helloMsg);
+        client->text(helloMsg);
+
+        Serial.println("Sent hello message:");
+        Serial.println(helloMsg);
+      }
+
+      Serial.println("========================================\n");
       break;
-      
+
     case WS_EVT_DISCONNECT:
-      Serial.printf("WS: Client #%u disconnected\n", client->id());
+      Serial.println("\n========================================");
+      Serial.printf("=== WEBSOCKET: Client #%u DISCONNECTED ===\n", client->id());
+      Serial.println("========================================\n");
       clientSubscriptions.erase(client->id());
       break;
-      
+
     case WS_EVT_DATA:
       handleWebSocketMessage(client, data, len);
       break;
-      
+
+    case WS_EVT_ERROR:
+      Serial.println("\n========================================");
+      Serial.printf("=== WEBSOCKET ERROR: Client #%u ===\n", client->id());
+      Serial.println("========================================\n");
+      break;
+
     default:
       break;
   }
@@ -759,21 +1192,29 @@ void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 
 // GET /signalk - Server info
 void handleSignalKRoot(AsyncWebServerRequest* req) {
+  Serial.println("\n=== /signalk DISCOVERY REQUEST ===");
+  Serial.printf("Client IP: %s\n", req->client()->remoteIP().toString().c_str());
+
   DynamicJsonDocument doc(1024);
-  
+
   JsonObject endpoints = doc.createNestedObject("endpoints");
   JsonObject v1 = endpoints.createNestedObject("v1");
-  
+
   v1["version"] = "1.7.0";
-  v1["signalk-http"] = "http://" + WiFi.localIP().toString() + "/signalk/v1/api/";
-  v1["signalk-ws"] = "ws://" + WiFi.localIP().toString() + "/signalk/v1/stream";
-  
+  v1["signalk-http"] = "http://" + WiFi.localIP().toString() + ":3000/signalk/v1/api/";
+  v1["signalk-ws"] = "ws://" + WiFi.localIP().toString() + ":3000/signalk/v1/stream";
+
   JsonObject server = doc.createNestedObject("server");
   server["id"] = serverName;
   server["version"] = "1.0.0";
-  
+
   String output;
   serializeJson(doc, output);
+
+  Serial.println("Response:");
+  Serial.println(output);
+  Serial.println("==================================\n");
+
   req->send(200, "application/json", output);
 }
 
@@ -783,7 +1224,142 @@ void handleAPIRoot(AsyncWebServerRequest* req) {
   doc["name"] = serverName;
   doc["version"] = "1.7.0";
   doc["self"] = "vessels." + vesselUUID;
-  
+
+  String output;
+  serializeJson(doc, output);
+  req->send(200, "application/json", output);
+}
+
+// POST /signalk/v1/access/requests - Handle access requests (auto-approve)
+void handleAccessRequest(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+  // Only process when we have the complete body
+  if (index + len != total) {
+    return;
+  }
+
+  Serial.println("\n=== ACCESS REQUEST (POST) ===");
+  Serial.printf("Body: %.*s\n", len, data);
+
+  DynamicJsonDocument doc(512);
+  DeserializationError error = deserializeJson(doc, data, len);
+
+  String clientId = doc["clientId"] | "unknown";
+  String description = doc["description"] | "SensESP client";
+
+  Serial.printf("Client ID: %s\n", clientId.c_str());
+  Serial.printf("Description: %s\n", description.c_str());
+
+  // Generate a requestId (use clientId as requestId for simplicity)
+  String requestId = clientId;
+
+  // Auto-approve: generate token immediately
+  String token = "APPROVED-" + String(esp_random(), HEX);
+
+  // Store the request for polling - it will be approved when polled
+  AccessRequestData reqData;
+  reqData.clientId = clientId;
+  reqData.description = description;
+  reqData.token = token;
+  reqData.state = "COMPLETED"; // Will be approved when polled
+  accessRequests[requestId] = reqData;
+
+  // SignalK spec: Initial POST returns 202 with PENDING state and href for polling
+  DynamicJsonDocument response(256);
+  response["state"] = "PENDING";  // Must return PENDING, not COMPLETED
+  response["requestId"] = requestId;
+  response["href"] = "/signalk/v1/access/requests/" + requestId;
+
+  String output;
+  serializeJson(response, output);
+
+  Serial.printf("Response (202 PENDING): %s\n", output.c_str());
+  Serial.printf("RequestId: %s, Token: %s (will be returned when polled)\n", requestId.c_str(), token.c_str());
+  Serial.println("Client should now poll: /signalk/v1/access/requests/" + requestId);
+  Serial.println("=================================\n");
+
+  req->send(202, "application/json", output);
+}
+
+// GET /signalk/v1/access/requests/{requestId} - Poll for access request status
+void handleGetAccessRequestById(AsyncWebServerRequest* req) {
+  String uri = req->url();
+  Serial.printf("\n=== GET ACCESS REQUEST: %s ===\n", uri.c_str());
+
+  // Extract requestId from URL path
+  // URL format: /signalk/v1/access/requests/{requestId}
+  int lastSlash = uri.lastIndexOf('/');
+  String requestId = uri.substring(lastSlash + 1);
+
+  Serial.printf("RequestId: %s\n", requestId.c_str());
+
+  // Check if requestId exists - if not, auto-create it (for SensESP compatibility)
+  if (accessRequests.find(requestId) == accessRequests.end()) {
+    Serial.println("RequestId not found - AUTO-CREATING token for compatibility");
+
+    // Create a new access request entry with auto-approved token
+    AccessRequestData newReqData;
+    newReqData.clientId = requestId;
+    newReqData.description = "Auto-approved (polling without POST)";
+    newReqData.token = "APPROVED-" + String(esp_random(), HEX);
+    newReqData.state = "COMPLETED";
+    accessRequests[requestId] = newReqData;
+
+    Serial.printf("Generated token: %s\n", newReqData.token.c_str());
+  }
+
+  AccessRequestData& reqData = accessRequests[requestId];
+
+  // Return the status with token
+  DynamicJsonDocument response(512);
+  response["state"] = reqData.state;
+  response["statusCode"] = 200;
+
+  JsonObject accessRequest = response.createNestedObject("accessRequest");
+  accessRequest["permission"] = "APPROVED";
+  accessRequest["token"] = reqData.token;
+
+  String output;
+  serializeJson(response, output);
+
+  Serial.printf("Response: %s\n", output.c_str());
+  Serial.println("==============================\n");
+
+  req->send(200, "application/json", output);
+}
+
+// GET /signalk/v1/access/requests - List access requests (always return empty)
+void handleGetAccessRequests(AsyncWebServerRequest* req) {
+  String url = req->url();
+
+  // Check if this is actually a request for a specific requestId
+  // URL: /signalk/v1/access/requests/test-client-12345
+  if (url.length() > 28 && url.startsWith("/signalk/v1/access/requests/")) {
+    // This is a request for a specific ID, route to the correct handler
+    Serial.println("=== Detected requestId in URL, routing to handleGetAccessRequestById ===");
+    Serial.printf("URL: %s\n", url.c_str());
+    handleGetAccessRequestById(req);
+    return;
+  }
+
+  // Return empty array - no pending requests since we auto-approve
+  Serial.println("=== GET /signalk/v1/access/requests - Returning empty list ===");
+  req->send(200, "application/json", "[]");
+}
+
+// GET /signalk/v1/auth/validate - Validate token (always valid)
+void handleAuthValidate(AsyncWebServerRequest* req) {
+  // Check if Authorization header is present
+  if (req->hasHeader("Authorization")) {
+    String auth = req->header("Authorization");
+    Serial.printf("Token validation request: %s\n", auth.c_str());
+  }
+
+  // Always return valid
+  DynamicJsonDocument doc(256);
+  doc["valid"] = true;
+  doc["state"] = "COMPLETED";
+  doc["statusCode"] = 200;
+
   String output;
   serializeJson(doc, output);
   req->send(200, "application/json", output);
@@ -791,11 +1367,14 @@ void handleAPIRoot(AsyncWebServerRequest* req) {
 
 // GET /signalk/v1/api/vessels/self
 void handleVesselsSelf(AsyncWebServerRequest* req) {
+  Serial.println("\n=== GET /signalk/v1/api/vessels/self ===");
+  Serial.printf("dataStore has %d items\n", dataStore.size());
+
   DynamicJsonDocument doc(4096);
-  
+
   doc["uuid"] = vesselUUID;
   doc["name"] = serverName;
-  
+
   // Navigation data
   if (dataStore.size() > 0) {
     JsonObject nav = doc.createNestedObject("navigation");
@@ -803,39 +1382,35 @@ void handleVesselsSelf(AsyncWebServerRequest* req) {
     for (auto& kv : dataStore) {
       String path = kv.first;
       if (!path.startsWith("navigation.")) continue;
+      Serial.printf("Processing navigation path: %s\n", path.c_str());
 
       String subPath = path.substring(11); // Remove "navigation."
 
       // Handle nested paths by creating nested objects
       JsonObject current = nav;
-      int lastDot = subPath.lastIndexOf('.');
-      if (lastDot > 0) {
-        // Split path into parts and create nested structure
-        String parentPath = subPath.substring(0, lastDot);
-        String finalKey = subPath.substring(lastDot + 1);
 
-        // Navigate/create parent path
-        int start = 0;
-        int dotPos;
-        while ((dotPos = parentPath.indexOf('.', start)) >= 0) {
-          String part = parentPath.substring(start, dotPos);
-          if (!current.containsKey(part)) {
-            current = current.createNestedObject(part);
-          } else {
-            current = current[part];
-          }
-          start = dotPos + 1;
-        }
-        // Handle last part of parent path
-        String part = parentPath.substring(start);
+      // Split the path and navigate through all parent parts
+      int dotIndex = 0;
+      int prevDotIndex = 0;
+      while ((dotIndex = subPath.indexOf('.', prevDotIndex)) >= 0) {
+        String part = subPath.substring(prevDotIndex, dotIndex);
         if (!current.containsKey(part)) {
           current = current.createNestedObject(part);
         } else {
-          current = current[part];
+          JsonVariant v = current[part];
+          if (v.is<JsonObject>()) {
+            current = v.as<JsonObject>();
+          } else {
+            // Key exists but is not an object, create nested object
+            current = current.createNestedObject(part);
+          }
         }
-
-        subPath = finalKey;
+        prevDotIndex = dotIndex + 1;
       }
+
+      // The remaining part is the final key
+      String finalKey = subPath.substring(prevDotIndex);
+      subPath = finalKey;
 
       JsonObject value = current.createNestedObject(subPath);
       value["timestamp"] = kv.second.timestamp;
@@ -863,7 +1438,84 @@ void handleVesselsSelf(AsyncWebServerRequest* req) {
       src["label"] = kv.second.source;
     }
   }
-  
+
+  // Add environment data (depth, wind, etc.)
+  JsonObject env = doc.createNestedObject("environment");
+  for (auto& kv : dataStore) {
+    String path = kv.first;
+    if (!path.startsWith("environment.")) continue;
+
+    String subPath = path.substring(12); // Remove "environment."
+
+    // Handle nested paths
+    JsonObject current = env;
+
+    // Split the path and navigate through all parent parts
+    int dotIndex = 0;
+    int prevDotIndex = 0;
+    while ((dotIndex = subPath.indexOf('.', prevDotIndex)) >= 0) {
+      String part = subPath.substring(prevDotIndex, dotIndex);
+      if (!current.containsKey(part)) {
+        current = current.createNestedObject(part);
+      } else {
+        JsonVariant v = current[part];
+        if (v.is<JsonObject>()) {
+          current = v.as<JsonObject>();
+        } else {
+          current = current.createNestedObject(part);
+        }
+      }
+      prevDotIndex = dotIndex + 1;
+    }
+
+    // The remaining part is the final key
+    String finalKey = subPath.substring(prevDotIndex);
+    subPath = finalKey;
+
+    JsonObject value = current.createNestedObject(subPath);
+    value["timestamp"] = kv.second.timestamp;
+
+    if (kv.second.isJson) {
+      DynamicJsonDocument valueDoc(512);
+      DeserializationError err = deserializeJson(valueDoc, kv.second.jsonValue);
+      if (!err) {
+        value["value"] = valueDoc.as<JsonVariant>();
+      } else {
+        value["value"] = kv.second.jsonValue;
+      }
+    } else if (kv.second.isNumeric) {
+      value["value"] = kv.second.numValue;
+    } else {
+      value["value"] = kv.second.strValue;
+    }
+
+    JsonObject meta = value.createNestedObject("meta");
+    if (kv.second.units.length() > 0) meta["units"] = kv.second.units;
+    if (kv.second.description.length() > 0) meta["description"] = kv.second.description;
+
+    JsonObject src = value.createNestedObject("$source");
+    src["label"] = kv.second.source;
+  }
+
+  // Add notifications
+  if (!notifications.empty()) {
+    JsonObject notifs = doc.createNestedObject("notifications");
+    for (auto& kv : dataStore) {
+      String path = kv.first;
+      if (!path.startsWith("notifications.")) continue;
+
+      String subPath = path.substring(14); // Remove "notifications."
+
+      if (kv.second.isJson) {
+        DynamicJsonDocument valueDoc(512);
+        DeserializationError err = deserializeJson(valueDoc, kv.second.jsonValue);
+        if (!err) {
+          notifs[subPath] = valueDoc.as<JsonVariant>();
+        }
+      }
+    }
+  }
+
   String output;
   serializeJson(doc, output);
   req->send(200, "application/json", output);
@@ -916,6 +1568,7 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
   path.replace("/", ".");
 
   Serial.println("\n=== PUT PATH REQUEST ===");
+  Serial.printf("Full URL: %s\n", req->url().c_str());
   Serial.printf("Path: %s\n", path.c_str());
   Serial.printf("Data length: %d bytes\n", len);
   Serial.printf("Raw body: %.*s\n", len, data);
@@ -969,6 +1622,56 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
     serializeJson(value, jsonStr);
     setPathValueJson(path, jsonStr, source, "", description);
     Serial.printf("Set object/array value: %s\n", jsonStr.c_str());
+
+    // Special handling for navigation.anchor.akat (6pack app config)
+    if (path == "navigation.anchor.akat" && value.is<JsonObject>()) {
+      JsonObject obj = value.as<JsonObject>();
+
+      // Extract anchor position
+      if (obj.containsKey("anchor")) {
+        JsonObject anchor = obj["anchor"];
+        if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
+          geofence.anchorLat = anchor["lat"];
+          geofence.anchorLon = anchor["lon"];
+          geofence.anchorTimestamp = millis();
+          Serial.printf("Anchor set: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
+        }
+        if (anchor.containsKey("radius")) {
+          geofence.radius = anchor["radius"];
+          Serial.printf("Geofence radius: %.0f m\n", geofence.radius);
+        }
+        if (anchor.containsKey("enabled")) {
+          geofence.enabled = anchor["enabled"];
+          Serial.printf("Geofence enabled: %s\n", geofence.enabled ? "true" : "false");
+        }
+      }
+
+      // Extract depth alarm config
+      if (obj.containsKey("depth")) {
+        JsonObject depth = obj["depth"];
+        if (depth.containsKey("min_depth")) {
+          depthAlarm.threshold = depth["min_depth"];
+          Serial.printf("Depth threshold: %.1f m\n", depthAlarm.threshold);
+        }
+        if (depth.containsKey("alarm")) {
+          depthAlarm.enabled = depth["alarm"];
+          Serial.printf("Depth alarm enabled: %s\n", depthAlarm.enabled ? "true" : "false");
+        }
+      }
+
+      // Extract wind alarm config
+      if (obj.containsKey("wind")) {
+        JsonObject wind = obj["wind"];
+        if (wind.containsKey("max_speed")) {
+          windAlarm.threshold = wind["max_speed"];
+          Serial.printf("Wind threshold: %.1f kn\n", windAlarm.threshold);
+        }
+        if (wind.containsKey("alarm")) {
+          windAlarm.enabled = wind["alarm"];
+          Serial.printf("Wind alarm enabled: %s\n", windAlarm.enabled ? "true" : "false");
+        }
+      }
+    }
   } else {
     Serial.println("Unsupported value type");
     req->send(400, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":400,\"message\":\"Unsupported value type\"}");
@@ -1472,7 +2175,7 @@ void processTcpData() {
       if (tcpBuffer.length() > 0) {
         if (tcpBuffer[0] == '$') {
           // This is an NMEA sentence - parse it
-          Serial.println("TCP NMEA: " + tcpBuffer);
+          // Serial.println("TCP NMEA: " + tcpBuffer);
           parseNMEASentence(tcpBuffer);
         } else {
           // Non-NMEA data - just log it for debugging
@@ -1616,6 +2319,72 @@ void setup() {
   }
   serverName = testPrefs.getString("server_name", "ESP32-SignalK");
   Serial.println("Read server_name from prefs");
+
+  // Restore persisted SignalK paths
+  Serial.println("Checking for persisted anchor.akat...");
+  String akatData = testPrefs.getString("anchor.akat", "");
+  Serial.printf("Read %d bytes from flash\n", akatData.length());
+
+  if (akatData.length() > 0) {
+    Serial.println("Restoring navigation.anchor.akat from flash...");
+    Serial.printf("Data: %s\n", akatData.c_str());
+    setPathValueJson("navigation.anchor.akat", akatData, "persisted", "", "Restored from flash");
+
+    // Parse and apply the configuration
+    DynamicJsonDocument doc(1024);
+    DeserializationError err = deserializeJson(doc, akatData);
+    if (!err && doc.is<JsonObject>()) {
+      JsonObject obj = doc.as<JsonObject>();
+
+      // Extract anchor position
+      if (obj.containsKey("anchor")) {
+        JsonObject anchor = obj["anchor"];
+        if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
+          geofence.anchorLat = anchor["lat"];
+          geofence.anchorLon = anchor["lon"];
+          geofence.anchorTimestamp = millis();
+          Serial.printf("Restored anchor: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
+        }
+        if (anchor.containsKey("radius")) {
+          geofence.radius = anchor["radius"];
+          Serial.printf("Restored radius: %.0f m\n", geofence.radius);
+        }
+        if (anchor.containsKey("enabled")) {
+          geofence.enabled = anchor["enabled"];
+          Serial.printf("Restored geofence enabled: %s\n", geofence.enabled ? "true" : "false");
+        }
+      }
+
+      // Extract depth alarm config
+      if (obj.containsKey("depth")) {
+        JsonObject depth = obj["depth"];
+        if (depth.containsKey("min_depth")) {
+          depthAlarm.threshold = depth["min_depth"];
+          Serial.printf("Restored depth threshold: %.1f m\n", depthAlarm.threshold);
+        }
+        if (depth.containsKey("alarm")) {
+          depthAlarm.enabled = depth["alarm"];
+          Serial.printf("Restored depth alarm: %s\n", depthAlarm.enabled ? "true" : "false");
+        }
+      }
+
+      // Extract wind alarm config
+      if (obj.containsKey("wind")) {
+        JsonObject wind = obj["wind"];
+        if (wind.containsKey("max_speed")) {
+          windAlarm.threshold = wind["max_speed"];
+          Serial.printf("Restored wind threshold: %.1f kn\n", windAlarm.threshold);
+        }
+        if (wind.containsKey("alarm")) {
+          windAlarm.enabled = wind["alarm"];
+          Serial.printf("Restored wind alarm: %s\n", windAlarm.enabled ? "true" : "false");
+        }
+      }
+    }
+  } else {
+    Serial.println("No persisted anchor.akat data found");
+  }
+
   testPrefs.end();
   Serial.println("Preferences closed successfully");
 
@@ -1706,12 +2475,27 @@ void setup() {
     req->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"POST received\"}");
   });
 
-  // SignalK discovery
-  server.on("/signalk", HTTP_GET, handleSignalKRoot);
+  // ===== SignalK Routes (IMPORTANT: Register most specific routes FIRST!) =====
+
+  // Access request polling by requestId - MUST be before /signalk/v1/access/requests
+  #ifdef ASYNCWEBSERVER_REGEX
+  server.on("^\\/signalk\\/v1\\/access\\/requests\\/(.+)$", HTTP_GET, handleGetAccessRequestById);
+  #endif
+
+  // Access requests (auto-approve for SensESP compatibility)
+  server.on("/signalk/v1/access/requests", HTTP_GET, handleGetAccessRequests);
+  server.on("/signalk/v1/access/requests", HTTP_POST,
+    [](AsyncWebServerRequest* req) {}, NULL, handleAccessRequest);
+
+  // Token validation (always valid)
+  server.on("/signalk/v1/auth/validate", HTTP_GET, handleAuthValidate);
 
   // API root
   server.on("/signalk/v1/api", HTTP_GET, handleAPIRoot);
   server.on("/signalk/v1/api/", HTTP_GET, handleAPIRoot);
+
+  // SignalK discovery - MUST be registered LAST among /signalk routes
+  server.on("/signalk", HTTP_GET, handleSignalKRoot);
 
   // Vessels
   server.on("/signalk/v1/api/vessels/self", HTTP_GET, handleVesselsSelf);
@@ -1753,8 +2537,14 @@ void setup() {
     Serial.printf("Body chunk: index=%d, len=%d, total=%d\n", index, len, total);
     Serial.println("========================================\n");
 
+    // Handle POST requests to access/requests
+    if (request->method() == HTTP_POST && url == "/signalk/v1/access/requests") {
+      Serial.println("Calling handleAccessRequest from onRequestBody...");
+      handleAccessRequest(request, data, len, index, total);
+      Serial.println("handleAccessRequest completed");
+    }
     // Handle PUT requests to vessels/self paths
-    if (request->method() == HTTP_PUT && url.startsWith("/signalk/v1/api/vessels/self/") && url.length() > 29) {
+    else if (request->method() == HTTP_PUT && url.startsWith("/signalk/v1/api/vessels/self/") && url.length() > 29) {
       Serial.println("Calling handlePutPath from onRequestBody...");
       handlePutPath(request, data, len, index, total);
       Serial.println("handlePutPath completed");
@@ -1764,6 +2554,16 @@ void setup() {
   // Catch-all handler - route vessels/self paths if regex didn't match
   server.onNotFound([](AsyncWebServerRequest* req) {
     String url = req->url();
+
+    // Check if this is an access request polling path
+    if (url.startsWith("/signalk/v1/access/requests/") && url.length() > 28) {
+      Serial.println("=== ROUTING ACCESS REQUEST BY ID (regex fallback) ===");
+      Serial.printf("URL: %s\n", url.c_str());
+      if (req->method() == HTTP_GET) {
+        handleGetAccessRequestById(req);
+      }
+      return;
+    }
 
     // Check if this is a vessels/self path that should be handled
     if (url.startsWith("/signalk/v1/api/vessels/self/") && url.length() > 29) {
@@ -1809,6 +2609,20 @@ void setup() {
   Serial.println("Starting HTTP server...");
   server.begin();
   Serial.println("\nHTTP Server started");
+
+  Serial.println("\n========================================");
+  Serial.println("=== SIGNALK SERVER READY ===");
+  Serial.println("========================================");
+  Serial.println("Server running on port 3000");
+  Serial.println("\n--- For SensESP Connection ---");
+  Serial.println("1. SensESP should POST to: /signalk/v1/access/requests");
+  Serial.println("2. Will receive 202 + requestId");
+  Serial.println("3. SensESP polls: /signalk/v1/access/requests/{requestId}");
+  Serial.println("4. Will receive token");
+  Serial.println("5. SensESP connects to: ws://IP:3000/signalk/v1/stream");
+  Serial.println("\n--- Discovery Endpoint ---");
+  Serial.println("GET /signalk returns WebSocket URL with :3000 port");
+  Serial.println("========================================\n");
 
   Serial.println("\n=== Access URLs ===");
   Serial.println("SignalK Server: http://192.168.4.1:3000/");

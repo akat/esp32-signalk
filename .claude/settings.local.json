@@ -3,7 +3,8 @@
     "allow": [
       "Bash(C:Usersakatsaris.platformiopenvScriptsplatformio.exe run:*)",
       "Bash(pio run:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)"
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload)"
     ],
     "deny": [],
     "ask": []
