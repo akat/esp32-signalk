@@ -799,19 +799,50 @@ void handleVesselsSelf(AsyncWebServerRequest* req) {
   // Navigation data
   if (dataStore.size() > 0) {
     JsonObject nav = doc.createNestedObject("navigation");
-    
+
     for (auto& kv : dataStore) {
       String path = kv.first;
       if (!path.startsWith("navigation.")) continue;
-      
+
       String subPath = path.substring(11); // Remove "navigation."
-      
-      JsonObject value = nav.createNestedObject(subPath);
+
+      // Handle nested paths by creating nested objects
+      JsonObject current = nav;
+      int lastDot = subPath.lastIndexOf('.');
+      if (lastDot > 0) {
+        // Split path into parts and create nested structure
+        String parentPath = subPath.substring(0, lastDot);
+        String finalKey = subPath.substring(lastDot + 1);
+
+        // Navigate/create parent path
+        int start = 0;
+        int dotPos;
+        while ((dotPos = parentPath.indexOf('.', start)) >= 0) {
+          String part = parentPath.substring(start, dotPos);
+          if (!current.containsKey(part)) {
+            current = current.createNestedObject(part);
+          } else {
+            current = current[part];
+          }
+          start = dotPos + 1;
+        }
+        // Handle last part of parent path
+        String part = parentPath.substring(start);
+        if (!current.containsKey(part)) {
+          current = current.createNestedObject(part);
+        } else {
+          current = current[part];
+        }
+
+        subPath = finalKey;
+      }
+
+      JsonObject value = current.createNestedObject(subPath);
       value["timestamp"] = kv.second.timestamp;
 
       if (kv.second.isJson) {
         // Parse JSON string and set as object
-        DynamicJsonDocument valueDoc(256);
+        DynamicJsonDocument valueDoc(512);
         DeserializationError err = deserializeJson(valueDoc, kv.second.jsonValue);
         if (!err) {
           value["value"] = valueDoc.as<JsonVariant>();
@@ -933,10 +964,10 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
     setPathValue(path, strValue, source, "", description);
     Serial.printf("Set string value: %s\n", strValue.c_str());
   } else if (value.is<JsonObject>() || value.is<JsonArray>()) {
-    // For complex objects, serialize to string
+    // For complex objects, serialize to string and store as JSON
     String jsonStr;
     serializeJson(value, jsonStr);
-    setPathValue(path, jsonStr, source, "", description);
+    setPathValueJson(path, jsonStr, source, "", description);
     Serial.printf("Set object/array value: %s\n", jsonStr.c_str());
   } else {
     Serial.println("Unsupported value type");
