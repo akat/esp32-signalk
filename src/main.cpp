@@ -30,11 +30,13 @@
 #define NMEA_TX 17
 #define NMEA_BAUD 4800
 
-#define WS_DELTA_MIN_MS 1000       // Minimum delta broadcast interval (1 second)
+#define WS_DELTA_MIN_MS 500        // Minimum delta broadcast interval (500ms for faster updates)
 #define WS_CLEANUP_MS 5000         // WebSocket cleanup interval
 
 // TCP Client Configuration
 #define TCP_RECONNECT_DELAY 5000   // Reconnect attempt interval (ms)
+#define NMEA_CLIENT_TIMEOUT 60000  // Client inactivity timeout (ms) - increased to 60s
+#define MAX_SENTENCES_PER_SECOND 100 // Rate limiting - increased from 50 to 100
 
 // WiFi AP Configuration
 // This AP is used both for direct connections and for the WiFiManager config portal
@@ -57,18 +59,33 @@ WiFiManager wm;  // WiFiManager instance for config portal
 String vesselUUID;
 String serverName = "ESP32-SignalK";
 
+// TCP Client State Machine
+enum TcpClientState {
+  TCP_DISCONNECTED,
+  TCP_CONNECTING,
+  TCP_CONNECTED,
+  TCP_ERROR
+};
+
 // TCP Client for external SignalK server
 WiFiClient tcpClient;
 String tcpServerHost = "";
 int tcpServerPort = 10110;
 bool tcpEnabled = false;
 uint32_t lastTcpReconnect = 0;
+uint32_t tcpConnectedTime = 0;
 String tcpBuffer = "";
+TcpClientState tcpState = TCP_DISCONNECTED;
 
 // TCP Server for receiving NMEA data (for mocking)
 WiFiServer nmeaTcpServer(10110);
 WiFiClient nmeaTcpClient;
 String nmeaTcpBuffer = "";
+uint32_t nmeaLastActivity = 0;
+
+// Rate limiting for NMEA sentences
+uint32_t sentenceCount = 0;
+uint32_t sentenceWindowStart = 0;
 
 // ====== PATH STORAGE ======
 struct PathValue {
@@ -94,9 +111,7 @@ std::map<String, PathValue> lastSentValues; // For delta compression
 // ====== WEBSOCKET SUBSCRIPTIONS ======
 struct ClientSubscription {
   std::set<String> paths;
-  uint32_t minPeriod;
   String format; // "delta" or "full"
-  uint32_t lastSend = 0;
 };
 
 std::map<uint32_t, ClientSubscription> clientSubscriptions; // clientId -> subscription
@@ -137,7 +152,7 @@ double knotsToMS(double knots) { return knots * 0.514444; }
 double degToRad(double deg) { return deg * M_PI / 180.0; }
 
 // ====== PATH OPERATIONS ======
-void setPathValue(const String& path, double value, const String& source = "nmea0183.GPS", 
+void setPathValue(const String& path, double value, const String& source = "nmea0183.GPS",
                   const String& units = "", const String& description = "") {
   PathValue& pv = dataStore[path];
   pv.numValue = value;
@@ -149,13 +164,9 @@ void setPathValue(const String& path, double value, const String& source = "nmea
   pv.units = units;
   pv.description = description;
   pv.changed = true;
-  
-  // Check if value actually changed
-  if (lastSentValues.count(path) > 0) {
-    if (abs(lastSentValues[path].numValue - value) < 0.0001) {
-      pv.changed = false;
-    }
-  }
+
+  // Always mark as changed - let the WebSocket throttling handle update frequency
+  // This ensures we don't miss important navigation updates
 }
 
 void setPathValue(const String& path, const String& value, const String& source = "nmea0183.GPS",
@@ -170,12 +181,8 @@ void setPathValue(const String& path, const String& value, const String& source 
   pv.units = units;
   pv.description = description;
   pv.changed = true;
-  
-  if (lastSentValues.count(path) > 0) {
-    if (lastSentValues[path].strValue == value) {
-      pv.changed = false;
-    }
-  }
+
+  // Always mark as changed - let the WebSocket throttling handle update frequency
 }
 
 void setPathValueJson(const String& path, const String& jsonValue, const String& source = "nmea0183.GPS",
@@ -190,15 +197,12 @@ void setPathValueJson(const String& path, const String& jsonValue, const String&
   pv.description = description;
   pv.changed = true;
 
-  if (lastSentValues.count(path) > 0) {
-    if (lastSentValues[path].jsonValue == jsonValue) {
-      pv.changed = false;
-    }
-  }
+  // Always mark as changed - let the WebSocket throttling handle update frequency
 }
 
 void updateNavigationPosition(double lat, double lon, const String& source = "nmea0183.GPS") {
   if (isnan(lat) || isnan(lon)) {
+    Serial.println("Position update rejected - NaN values");
     return;
   }
 
@@ -208,26 +212,67 @@ void updateNavigationPosition(double lat, double lon, const String& source = "nm
 
   String json;
   serializeJson(doc, json);
+
+  Serial.println("=== Position Update ===");
+  Serial.printf("Lat: %.6f, Lon: %.6f\n", lat, lon);
+  Serial.println("JSON: " + json);
+  Serial.println("======================");
+
   setPathValueJson("navigation.position", json, source, "", "Vessel position");
 }
 
 // ====== NMEA PARSING ======
+bool validateNmeaChecksum(const String& sentence) {
+  int starPos = sentence.indexOf('*');
+  if (starPos < 0) return true;  // No checksum present, accept sentence
+
+  String data = sentence.substring(1, starPos);  // Skip '$'
+  String checksumStr = sentence.substring(starPos + 1);
+
+  if (checksumStr.length() != 2) return false;  // Invalid checksum format
+
+  uint8_t checksum = 0;
+  for (int i = 0; i < data.length(); i++) {
+    checksum ^= data[i];
+  }
+
+  uint8_t expected = strtol(checksumStr.c_str(), NULL, 16);
+  return checksum == expected;
+}
+
 double nmeaCoordToDec(const String& coord, const String& hemisphere) {
-  if (coord.length() < 4) return NAN;
-  
+  if (coord.length() < 4) {
+    Serial.println("Coord too short: " + coord);
+    return NAN;
+  }
+
   int dotPos = coord.indexOf('.');
-  if (dotPos < 0) return NAN;
-  
-  int degLen = (dotPos <= 3) ? 2 : 3; // 2 for lat, 3 for lon
-  
-  double degrees = coord.substring(0, degLen).toDouble();
-  double minutes = coord.substring(degLen).toDouble();
+  if (dotPos < 0) {
+    Serial.println("No dot in coord: " + coord);
+    return NAN;
+  }
+
+  // NMEA format: latitude is DDMM.MMMM (2 digits degrees), longitude is DDDMM.MMMM (3 digits degrees)
+  // Determine if this is lat or lon based on the dot position
+  // Latitude: dot should be at position 4 (DDMM.M)
+  // Longitude: dot should be at position 5 (DDDMM.M)
+  int degLen = (dotPos == 4) ? 2 : 3;
+
+  String degStr = coord.substring(0, degLen);
+  String minStr = coord.substring(degLen);
+
+  double degrees = degStr.toDouble();
+  double minutes = minStr.toDouble();
   double decimal = degrees + (minutes / 60.0);
-  
+
+  Serial.printf("Coord: %s, Hemisphere: %s\n", coord.c_str(), hemisphere.c_str());
+  Serial.printf("  Degrees: %s = %.2f, Minutes: %s = %.6f\n", degStr.c_str(), degrees, minStr.c_str(), minutes);
+  Serial.printf("  Result: %.6f\n", decimal);
+
   if (hemisphere == "S" || hemisphere == "W") {
     decimal = -decimal;
   }
-  
+
   return decimal;
 }
 
@@ -253,7 +298,14 @@ std::vector<String> splitNMEA(const String& sentence) {
 
 void parseNMEASentence(const String& sentence) {
   if (sentence.length() < 7 || sentence[0] != '$') return;
-  
+
+  // Validate checksum if present (only warn, don't reject for now)
+  if (!validateNmeaChecksum(sentence)) {
+    Serial.println("NMEA: Warning - checksum validation failed for: " + sentence);
+    // Continue processing anyway - some devices send sentences without checksums
+    // or with incorrect checksums but the data is still valid
+  }
+
   std::vector<String> fields = splitNMEA(sentence);
   if (fields.size() < 3) return;
   
@@ -273,9 +325,8 @@ void parseNMEASentence(const String& sentence) {
       gpsData.lat = lat;
       gpsData.lon = lon;
       gpsData.timestamp = iso8601Now();
-      
-      setPathValue("navigation.position.latitude", lat, "nmea0183.GPS", "deg", "Latitude");
-      setPathValue("navigation.position.longitude", lon, "nmea0183.GPS", "deg", "Longitude");
+
+      // Only use the combined position object, not separate lat/lon paths
       updateNavigationPosition(lat, lon);
     }
     
@@ -304,9 +355,8 @@ void parseNMEASentence(const String& sentence) {
       gpsData.satellites = sats;
       gpsData.fixQuality = quality;
       gpsData.timestamp = iso8601Now();
-      
-      setPathValue("navigation.position.latitude", lat, "nmea0183.GPS", "deg", "Latitude");
-      setPathValue("navigation.position.longitude", lon, "nmea0183.GPS", "deg", "Longitude");
+
+      // Only use the combined position object, not separate lat/lon paths
       setPathValue("navigation.gnss.satellitesInView", (double)sats, "nmea0183.GPS", "", "Satellites in view");
       updateNavigationPosition(lat, lon);
     }
@@ -355,8 +405,7 @@ void parseNMEASentence(const String& sentence) {
       gpsData.lon = lon;
       gpsData.timestamp = iso8601Now();
 
-      setPathValue("navigation.position.latitude", lat, "nmea0183.GPS", "deg", "Latitude");
-      setPathValue("navigation.position.longitude", lon, "nmea0183.GPS", "deg", "Longitude");
+      // Only use the combined position object, not separate lat/lon paths
       updateNavigationPosition(lat, lon);
     }
   }
@@ -546,11 +595,7 @@ void parseNMEASentence(const String& sentence) {
 
 // ====== WEBSOCKET DELTA BROADCAST ======
 void broadcastDeltas() {
-  static uint32_t lastBroadcast = 0;
-  uint32_t now = millis();
-  
-  if (now - lastBroadcast < WS_DELTA_MIN_MS) return;
-  lastBroadcast = now;
+  // Removed throttling - broadcast immediately when data is available
   
   // Build delta message
   DynamicJsonDocument doc(4096);
@@ -596,9 +641,18 @@ void broadcastDeltas() {
   }
   
   if (!hasChanges) return;
-  
+
   String output;
   serializeJson(doc, output);
+
+  // Debug: Log WebSocket broadcast
+  static uint32_t lastDebugLog = 0;
+  if (millis() - lastDebugLog > 5000) {  // Log every 5 seconds to avoid spam
+    Serial.println("=== WebSocket Broadcast ===");
+    Serial.println(output);
+    Serial.println("==========================");
+    lastDebugLog = millis();
+  }
 
   if (clientSubscriptions.empty()) {
     // Legacy behavior: broadcast to everyone when no one negotiated subscriptions
@@ -606,7 +660,7 @@ void broadcastDeltas() {
     return;
   }
 
-  // Send only to clients whose throttle window has elapsed
+  // Send to all subscribed clients immediately (no throttling)
   for (auto it = clientSubscriptions.begin(); it != clientSubscriptions.end();) {
     AsyncWebSocketClient* client = ws.client(it->first);
     if (!client) {
@@ -614,12 +668,7 @@ void broadcastDeltas() {
       continue;
     }
 
-    ClientSubscription& sub = it->second;
-    uint32_t effectivePeriod = std::max(sub.minPeriod, (uint32_t)WS_DELTA_MIN_MS);
-    if (now - sub.lastSend >= effectivePeriod) {
-      client->text(output);
-      sub.lastSend = now;
-    }
+    client->text(output);
     ++it;
   }
 }
@@ -656,8 +705,7 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
         sub.paths.insert(path);
       }
     }
-    
-    sub.minPeriod = doc["minPeriod"] | 1000;
+
     sub.format = doc["format"] | "delta";
     
     // Send hello message
@@ -760,17 +808,26 @@ void handleVesselsSelf(AsyncWebServerRequest* req) {
       
       JsonObject value = nav.createNestedObject(subPath);
       value["timestamp"] = kv.second.timestamp;
-      
-      if (kv.second.isNumeric) {
+
+      if (kv.second.isJson) {
+        // Parse JSON string and set as object
+        DynamicJsonDocument valueDoc(256);
+        DeserializationError err = deserializeJson(valueDoc, kv.second.jsonValue);
+        if (!err) {
+          value["value"] = valueDoc.as<JsonVariant>();
+        } else {
+          value["value"] = kv.second.jsonValue;
+        }
+      } else if (kv.second.isNumeric) {
         value["value"] = kv.second.numValue;
       } else {
         value["value"] = kv.second.strValue;
       }
-      
+
       JsonObject meta = value.createNestedObject("meta");
       if (kv.second.units.length() > 0) meta["units"] = kv.second.units;
       if (kv.second.description.length() > 0) meta["description"] = kv.second.description;
-      
+
       JsonObject src = value.createNestedObject("$source");
       src["label"] = kv.second.source;
     }
@@ -793,13 +850,22 @@ void handleGetPath(AsyncWebServerRequest* req) {
   
   PathValue& pv = dataStore[path];
   DynamicJsonDocument doc(512);
-  
-  if (pv.isNumeric) {
+
+  if (pv.isJson) {
+    // Parse JSON string and set as object
+    DynamicJsonDocument valueDoc(256);
+    DeserializationError err = deserializeJson(valueDoc, pv.jsonValue);
+    if (!err) {
+      doc["value"] = valueDoc.as<JsonVariant>();
+    } else {
+      doc["value"] = pv.jsonValue;
+    }
+  } else if (pv.isNumeric) {
     doc["value"] = pv.numValue;
   } else {
     doc["value"] = pv.strValue;
   }
-  
+
   doc["timestamp"] = pv.timestamp;
   doc["$source"] = pv.source;
   
@@ -1300,6 +1366,7 @@ void saveTcpConfig(String host, int port, bool enabled) {
 
 void connectToTcpServer() {
   if (!tcpEnabled || tcpServerHost.length() == 0) {
+    tcpState = TCP_DISCONNECTED;
     return;
   }
 
@@ -1310,10 +1377,12 @@ void connectToTcpServer() {
       Serial.println("TCP: Cannot connect - WiFi not connected to internet");
       lastWifiWarning = now;
     }
+    tcpState = TCP_ERROR;
     return;
   }
 
   if (tcpClient.connected()) {
+    tcpState = TCP_CONNECTED;
     return; // Already connected
   }
 
@@ -1323,6 +1392,7 @@ void connectToTcpServer() {
   }
 
   lastTcpReconnect = now;
+  tcpState = TCP_CONNECTING;
 
   Serial.println("\n=== Connecting to TCP Server ===");
   Serial.println("Host: " + tcpServerHost);
@@ -1337,19 +1407,30 @@ void connectToTcpServer() {
       Serial.println("TCP: Connected successfully!");
       Serial.println("Remote IP: " + tcpClient.remoteIP().toString());
       tcpBuffer = "";
+      tcpConnectedTime = millis();
+      tcpState = TCP_CONNECTED;
     } else {
       Serial.println("TCP: Connection failed (connection refused or timeout)");
+      tcpState = TCP_ERROR;
     }
   } else {
     Serial.println("TCP: DNS resolution failed for " + tcpServerHost);
     Serial.println("Check hostname and ensure DNS is working");
+    tcpState = TCP_ERROR;
   }
 }
 
 void processTcpData() {
   if (!tcpEnabled || !tcpClient.connected()) {
+    if (tcpState == TCP_CONNECTED) {
+      tcpState = TCP_DISCONNECTED;
+      Serial.println("TCP: Connection lost");
+    }
     return;
   }
+
+  // Removed aggressive connection quality check that was causing false disconnects
+  // The standard tcpClient.connected() check below is sufficient
 
   // Read available data - process NMEA sentences from TCP
   while (tcpClient.available()) {
@@ -1357,16 +1438,25 @@ void processTcpData() {
 
     // NMEA sentences end with newline
     if (c == '\n' || c == '\r') {
-      if (tcpBuffer.length() > 6 && tcpBuffer[0] == '$') {
-        // This is an NMEA sentence - parse it
-        Serial.println("TCP NMEA: " + tcpBuffer);
-        parseNMEASentence(tcpBuffer);
+      if (tcpBuffer.length() > 0) {
+        if (tcpBuffer[0] == '$') {
+          // This is an NMEA sentence - parse it
+          Serial.println("TCP NMEA: " + tcpBuffer);
+          parseNMEASentence(tcpBuffer);
+        } else {
+          // Non-NMEA data - just log it for debugging
+          Serial.println("TCP Data (non-NMEA): " + tcpBuffer);
+        }
       }
       tcpBuffer = "";
     } else if (c >= 32 && c <= 126) {
       // Only accept printable ASCII characters
       if (tcpBuffer.length() < 120) { // NMEA max length is typically 82 chars
         tcpBuffer += c;
+      } else {
+        // Buffer overflow protection - reset
+        tcpBuffer = "";
+        Serial.println("TCP: Buffer overflow, resetting");
       }
     }
   }
@@ -1375,38 +1465,78 @@ void processTcpData() {
   if (!tcpClient.connected()) {
     Serial.println("TCP: Connection lost");
     tcpBuffer = "";
+    tcpState = TCP_DISCONNECTED;
   }
 }
 
 void processNmeaTcpServer() {
   // Check for new client connections
   if (!nmeaTcpClient || !nmeaTcpClient.connected()) {
+    // Clean up existing client first
+    if (nmeaTcpClient) {
+      nmeaTcpClient.stop();
+    }
+
     nmeaTcpClient = nmeaTcpServer.available();
     if (nmeaTcpClient) {
       Serial.println("NMEA TCP Server: New client connected from " + nmeaTcpClient.remoteIP().toString());
       nmeaTcpBuffer = "";
+      nmeaLastActivity = millis();
+      sentenceCount = 0;
+      sentenceWindowStart = millis();
     }
   }
 
   // Process data from connected client
   if (nmeaTcpClient && nmeaTcpClient.connected()) {
+    // Check for rate limiting window reset
+    uint32_t now = millis();
+    if (now - sentenceWindowStart > 1000) {
+      sentenceCount = 0;
+      sentenceWindowStart = now;
+    }
+
+    // Check for client timeout
+    if (nmeaTcpClient.available()) {
+      nmeaLastActivity = now;
+    } else if (now - nmeaLastActivity > NMEA_CLIENT_TIMEOUT) {
+      Serial.println("NMEA TCP Server: Client timeout, disconnecting");
+      nmeaTcpClient.stop();
+      nmeaTcpBuffer = "";
+      return;
+    }
+
     while (nmeaTcpClient.available()) {
       char c = nmeaTcpClient.read();
 
       // NMEA sentences end with newline
       if (c == '\n' || c == '\r') {
         if (nmeaTcpBuffer.length() > 6 && nmeaTcpBuffer[0] == '$') {
+          // Rate limiting check
+          if (sentenceCount >= MAX_SENTENCES_PER_SECOND) {
+            Serial.println("NMEA TCP Server: Rate limit exceeded, disconnecting client");
+            nmeaTcpClient.stop();
+            nmeaTcpBuffer = "";
+            return;
+          }
+
           // This is an NMEA sentence - parse it
           Serial.println("NMEA TCP Server: " + nmeaTcpBuffer);
-          // Add a small delay to prevent overwhelming the system
-          delay(1);
           parseNMEASentence(nmeaTcpBuffer);
+          sentenceCount++;
+
+          // Allow other tasks to run without blocking
+          yield();
         }
         nmeaTcpBuffer = "";
       } else if (c >= 32 && c <= 126) {
         // Only accept printable ASCII characters
         if (nmeaTcpBuffer.length() < 120) { // NMEA max length is typically 82 chars
           nmeaTcpBuffer += c;
+        } else {
+          // Buffer overflow protection - reset
+          nmeaTcpBuffer = "";
+          Serial.println("NMEA TCP Server: Buffer overflow, resetting");
         }
       }
     }
