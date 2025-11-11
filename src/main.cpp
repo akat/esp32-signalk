@@ -1,9 +1,10 @@
 /*
-  ESP32 SignalK Server - Full Implementation
+  ESP32 SignalK Server - Full Implementation with Access Requests
   Compatible with SignalK clients and apps
   Features:
   - WiFiManager for easy setup (like SenseESP)
   - Full SignalK REST API structure
+  - SignalK Security API with access requests
   - WebSocket with subscribe/unsubscribe
   - Authentication with tokens
   - NMEA0183 parsing (GPS)
@@ -17,6 +18,7 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
+#include <ESPmDNS.h>
 #include <time.h>
 #include <vector>
 #include <map>
@@ -29,20 +31,27 @@
 
 #define WS_DELTA_MIN_MS 100        // Minimum delta broadcast interval
 #define WS_CLEANUP_MS 5000         // WebSocket cleanup interval
-#define AUTH_TOKEN_LENGTH 32       // Token length
+
+// WiFi AP Configuration
+// This AP is used both for direct connections and for the WiFiManager config portal
+#define AP_SSID "ESP32-SignalK"    // WiFi network name
+#define AP_PASSWORD "signalk123"   // WiFi password (min 8 chars)
+#define AP_CHANNEL 1               // WiFi channel
+#define AP_HIDDEN false            // Broadcast SSID
+#define AP_MAX_CONNECTIONS 4       // Max simultaneous connections
+
+// WiFi Client Configuration is now handled by WiFiManager
+// Connect to the AP and navigate to http://192.168.4.1 to configure WiFi network
 
 // ====== GLOBALS ======
-AsyncWebServer server(80);
+AsyncWebServer server(3000);  // SignalK default port
 AsyncWebSocket ws("/signalk/v1/stream");
 Preferences prefs;
-WiFiManager wm;
+WiFiManager wm;  // WiFiManager instance for config portal
 
 // SignalK vessel UUID (persistent)
 String vesselUUID;
 String serverName = "ESP32-SignalK";
-
-// Authentication tokens (stored in NVS)
-std::map<String, String> authTokens; // token -> role ("admin", "readonly")
 
 // ====== PATH STORAGE ======
 struct PathValue {
@@ -93,15 +102,6 @@ String generateUUID() {
     esp_random(), esp_random() & 0xFFFF, esp_random() & 0xFFFF,
     esp_random() & 0xFFFF, esp_random());
   return String(uuid);
-}
-
-String generateToken() {
-  const char* chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  String token = "";
-  for(int i = 0; i < AUTH_TOKEN_LENGTH; i++) {
-    token += chars[esp_random() % 62];
-  }
-  return token;
 }
 
 String iso8601Now() {
@@ -285,72 +285,6 @@ void parseNMEASentence(const String& sentence) {
   }
 }
 
-// ====== AUTHENTICATION ======
-void loadAuthTokens() {
-  prefs.begin("signalk", false);
-  int count = prefs.getInt("token_count", 0);
-  
-  for (int i = 0; i < count; i++) {
-    String tokenKey = "token_" + String(i);
-    String roleKey = "role_" + String(i);
-    
-    String token = prefs.getString(tokenKey.c_str(), "");
-    String role = prefs.getString(roleKey.c_str(), "");
-    
-    if (token.length() > 0) {
-      authTokens[token] = role;
-    }
-  }
-  
-  // Create default admin token if none exists
-  if (authTokens.empty()) {
-    String defaultToken = generateToken();
-    authTokens[defaultToken] = "admin";
-    prefs.putString("token_0", defaultToken);
-    prefs.putString("role_0", "admin");
-    prefs.putInt("token_count", 1);
-    Serial.println("\n=== DEFAULT ADMIN TOKEN ===");
-    Serial.println(defaultToken);
-    Serial.println("===========================\n");
-  }
-  
-  prefs.end();
-}
-
-bool validateToken(const String& token, bool requireAdmin = false) {
-  if (token.length() == 0) return false;
-  
-  auto it = authTokens.find(token);
-  if (it == authTokens.end()) return false;
-  
-  if (requireAdmin && it->second != "admin") return false;
-  
-  return true;
-}
-
-String getTokenFromRequest(AsyncWebServerRequest* req) {
-  // Check Authorization header (Bearer token)
-  if (req->hasHeader("Authorization")) {
-    String auth = req->getHeader("Authorization")->value();
-    if (auth.startsWith("Bearer ")) {
-      return auth.substring(7);
-    }
-  }
-  
-  // Check cookie
-  if (req->hasHeader("Cookie")) {
-    String cookies = req->getHeader("Cookie")->value();
-    int pos = cookies.indexOf("JAUTHENTICATION=");
-    if (pos >= 0) {
-      int end = cookies.indexOf(';', pos);
-      if (end < 0) end = cookies.length();
-      return cookies.substring(pos + 16, end);
-    }
-  }
-  
-  return "";
-}
-
 // ====== WEBSOCKET DELTA BROADCAST ======
 void broadcastDeltas() {
   static uint32_t lastBroadcast = 0;
@@ -495,7 +429,7 @@ void handleSignalKRoot(AsyncWebServerRequest* req) {
   JsonObject endpoints = doc.createNestedObject("endpoints");
   JsonObject v1 = endpoints.createNestedObject("v1");
   
-  v1["version"] = "1.0.0";
+  v1["version"] = "1.7.0";
   v1["signalk-http"] = "http://" + WiFi.localIP().toString() + "/signalk/v1/api/";
   v1["signalk-ws"] = "ws://" + WiFi.localIP().toString() + "/signalk/v1/stream";
   
@@ -512,7 +446,7 @@ void handleSignalKRoot(AsyncWebServerRequest* req) {
 void handleAPIRoot(AsyncWebServerRequest* req) {
   DynamicJsonDocument doc(512);
   doc["name"] = serverName;
-  doc["version"] = "1.0.0";
+  doc["version"] = "1.7.0";
   doc["self"] = "vessels." + vesselUUID;
   
   String output;
@@ -587,104 +521,86 @@ void handleGetPath(AsyncWebServerRequest* req) {
   req->send(200, "application/json", output);
 }
 
-// PUT /signalk/v1/api/vessels/self/* - Update path (requires admin)
+// PUT /signalk/v1/api/vessels/self/* - Update path (no auth required)
 void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-  String token = getTokenFromRequest(req);
-  
-  if (!validateToken(token, true)) {
-    req->send(401, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":401,\"message\":\"Unauthorized\"}");
-    return;
+  // Only process when we have the complete body
+  if (index + len != total) {
+    return;  // Wait for more data
   }
-  
+
   String path = req->url().substring(String("/signalk/v1/api/vessels/self/").length());
   path.replace("/", ".");
-  
-  DynamicJsonDocument doc(512);
+
+  Serial.println("\n=== PUT PATH REQUEST ===");
+  Serial.printf("Path: %s\n", path.c_str());
+  Serial.printf("Data length: %d bytes\n", len);
+
+  DynamicJsonDocument doc(1024);  // Increased size for complex values
   DeserializationError error = deserializeJson(doc, data, len);
-  
+
   if (error) {
+    Serial.printf("JSON parse error: %s\n", error.c_str());
     req->send(400, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":400,\"message\":\"Invalid JSON\"}");
     return;
   }
-  
-  JsonVariant value = doc["value"];
-  
-  if (value.is<double>() || value.is<int>()) {
-    setPathValue(path, value.as<double>(), "manual", "", "Manually set");
-  } else if (value.is<const char*>()) {
-    setPathValue(path, String(value.as<const char*>()), "manual", "", "Manually set");
+
+  // Support both {"value": X} and direct value
+  JsonVariant value;
+  if (doc.containsKey("value")) {
+    value = doc["value"];
   } else {
-    req->send(400, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":400,\"message\":\"Invalid value type\"}");
+    value = doc.as<JsonVariant>();
+  }
+
+  // Get optional source and description
+  String source = doc["source"] | "app";
+  String description = doc["description"] | "Set by client";
+
+  // Handle different value types
+  if (value.isNull()) {
+    req->send(400, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":400,\"message\":\"Value cannot be null\"}");
+    return;
+  } else if (value.is<double>() || value.is<int>() || value.is<float>()) {
+    double numValue = value.as<double>();
+    setPathValue(path, numValue, source, "", description);
+    Serial.printf("Set numeric value: %.6f\n", numValue);
+  } else if (value.is<bool>()) {
+    // Store boolean as 0 or 1
+    double boolValue = value.as<bool>() ? 1.0 : 0.0;
+    setPathValue(path, boolValue, source, "", description);
+    Serial.printf("Set boolean value: %s\n", value.as<bool>() ? "true" : "false");
+  } else if (value.is<const char*>() || value.is<String>()) {
+    String strValue = value.as<String>();
+    setPathValue(path, strValue, source, "", description);
+    Serial.printf("Set string value: %s\n", strValue.c_str());
+  } else if (value.is<JsonObject>() || value.is<JsonArray>()) {
+    // For complex objects, serialize to string
+    String jsonStr;
+    serializeJson(value, jsonStr);
+    setPathValue(path, jsonStr, source, "", description);
+    Serial.printf("Set object/array value: %s\n", jsonStr.c_str());
+  } else {
+    Serial.println("Unsupported value type");
+    req->send(400, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":400,\"message\":\"Unsupported value type\"}");
     return;
   }
-  
+
+  Serial.println("Path updated successfully");
+  Serial.println("=======================\n");
+
   DynamicJsonDocument response(256);
   response["state"] = "COMPLETED";
   response["statusCode"] = 200;
-  
+
   String output;
   serializeJson(response, output);
   req->send(200, "application/json", output);
 }
 
-// GET /admin/tokens - List tokens (admin only)
-void handleListTokens(AsyncWebServerRequest* req) {
-  String token = getTokenFromRequest(req);
-  
-  if (!validateToken(token, true)) {
-    req->send(401, "text/plain", "Unauthorized");
-    return;
-  }
-  
-  DynamicJsonDocument doc(2048);
-  JsonArray tokens = doc.to<JsonArray>();
-  
-  for (auto& kv : authTokens) {
-    JsonObject t = tokens.createNestedObject();
-    t["token"] = kv.first;
-    t["role"] = kv.second;
-  }
-  
-  String output;
-  serializeJson(doc, output);
-  req->send(200, "application/json", output);
-}
+// ====== ADMIN UI FOR ACCESS REQUESTS ======
+// Authentication removed - no admin UI needed
 
-// POST /admin/tokens - Create new token (admin only)
-void handleCreateToken(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-  String token = getTokenFromRequest(req);
-  
-  if (!validateToken(token, true)) {
-    req->send(401, "text/plain", "Unauthorized");
-    return;
-  }
-  
-  DynamicJsonDocument doc(256);
-  DeserializationError error = deserializeJson(doc, data, len);
-  
-  String role = doc["role"] | "readonly";
-  String newToken = generateToken();
-  
-  authTokens[newToken] = role;
-  
-  // Save to NVS
-  prefs.begin("signalk", false);
-  int count = prefs.getInt("token_count", 0);
-  prefs.putString(("token_" + String(count)).c_str(), newToken);
-  prefs.putString(("role_" + String(count)).c_str(), role);
-  prefs.putInt("token_count", count + 1);
-  prefs.end();
-  
-  DynamicJsonDocument response(256);
-  response["token"] = newToken;
-  response["role"] = role;
-  
-  String output;
-  serializeJson(response, output);
-  req->send(200, "application/json", output);
-}
-
-// Simple web UI
+// ====== MAIN WEB UI ======
 const char* HTML_UI = R"html(
 <!DOCTYPE html>
 <html>
@@ -707,6 +623,8 @@ const char* HTML_UI = R"html(
     code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 13px; }
     .value { font-weight: 500; color: #2196f3; }
     .timestamp { color: #999; font-size: 12px; }
+    a { color: #2196f3; text-decoration: none; font-weight: 500; }
+    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -749,7 +667,6 @@ const char* HTML_UI = R"html(
       statusEl.textContent = 'Connected';
       statusEl.className = 'status connected';
       
-      // Subscribe to all paths
       ws.send(JSON.stringify({
         context: '*',
         subscribe: [{ path: '*', period: 1000, format: 'delta', policy: 'instant' }]
@@ -765,12 +682,10 @@ const char* HTML_UI = R"html(
       try {
         const msg = JSON.parse(event.data);
         
-        // Handle hello message
         if (msg.self) {
           document.getElementById('vessel-uuid').textContent = msg.self;
         }
         
-        // Handle delta updates
         if (msg.updates) {
           msg.updates.forEach(update => {
             if (update.values) {
@@ -778,7 +693,6 @@ const char* HTML_UI = R"html(
                 const path = item.path;
                 let value = item.value;
                 
-                // Format value
                 if (typeof value === 'number') {
                   value = value.toFixed(6);
                 } else if (typeof value === 'object') {
@@ -804,7 +718,6 @@ const char* HTML_UI = R"html(
     function renderTable() {
       tbody.innerHTML = '';
       
-      // Sort paths alphabetically
       const sortedPaths = Array.from(paths.entries()).sort((a, b) => a[0].localeCompare(b[0]));
       
       sortedPaths.forEach(([path, data]) => {
@@ -855,111 +768,179 @@ void setup() {
   }
   serverName = prefs.getString("server_name", "ESP32-SignalK");
   prefs.end();
-  
-  // Load authentication tokens
-  loadAuthTokens();
 
-  // Print admin token for convenience
-  if (!authTokens.empty()) {
-    for (auto& kv : authTokens) {
-      if (kv.second == "admin") {
-        Serial.println("\n=== CURRENT ADMIN TOKEN ===");
-        Serial.println(kv.first);
-        Serial.println("===========================\n");
-        break;
-      }
-    }
-  }
-  
-  // WiFiManager setup (like SenseESP)
-  WiFi.mode(WIFI_STA);
-  wm.setConfigPortalTimeout(180); // 3 minutes timeout
-  wm.setAPClientCheck(true);
-  wm.setBreakAfterConfig(true);
-  
-  // Custom parameters
-  WiFiManagerParameter custom_name("name", "Server Name", serverName.c_str(), 40);
-  wm.addParameter(&custom_name);
-  
-  Serial.println("Starting WiFiManager...");
-  Serial.println("If no saved WiFi, AP will start as 'SignalK-Setup'");
-  
-  bool res = wm.autoConnect("SignalK-Setup", "signalk123");
-  
-  if (!res) {
-    Serial.println("Failed to connect, restarting...");
+  // Start WiFi AP immediately (non-blocking)
+  Serial.println("\n=== Starting WiFi Access Point ===");
+  WiFi.mode(WIFI_AP);
+
+  // Configure AP with static IP
+  WiFi.softAPConfig(
+    IPAddress(192, 168, 4, 1),    // AP IP address
+    IPAddress(192, 168, 4, 1),    // Gateway
+    IPAddress(255, 255, 255, 0)   // Subnet mask
+  );
+
+  bool apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONNECTIONS);
+
+  if (!apStarted) {
+    Serial.println("Failed to start Access Point, restarting...");
     delay(3000);
     ESP.restart();
   }
-  
-  // Save custom parameters
-  String newName = custom_name.getValue();
-  if (newName.length() > 0 && newName != serverName) {
-    serverName = newName;
-    prefs.begin("signalk", false);
-    prefs.putString("server_name", serverName);
-    prefs.end();
+
+  Serial.println("SSID: " + String(AP_SSID));
+  Serial.println("Password: " + String(AP_PASSWORD));
+  Serial.println("AP IP Address: " + WiFi.softAPIP().toString());
+  Serial.println("AP MAC Address: " + WiFi.softAPmacAddress());
+  Serial.println("==============================\n");
+
+  // Start mDNS
+  if (MDNS.begin("esp32-signalk")) {
+    Serial.println("mDNS responder started");
+    Serial.println("Hostname: esp32-signalk.local");
+    MDNS.addService("http", "tcp", 3000);
+    MDNS.addService("signalk-http", "tcp", 3000);
+    MDNS.addService("signalk-ws", "tcp", 3000);
+  } else {
+    Serial.println("Error starting mDNS");
   }
-  
-  Serial.println("\nWiFi Connected!");
-  Serial.println("IP Address: " + WiFi.localIP().toString());
-  Serial.println("SignalK API: http://" + WiFi.localIP().toString() + "/signalk/v1/api/");
-  Serial.println("WebSocket: ws://" + WiFi.localIP().toString() + "/signalk/v1/stream");
-  
-  // NTP Time sync
-  configTime(0, 0, "pool.ntp.org", "time.ntp.org");
-  Serial.println("Syncing time with NTP...");
-  
-  // Wait for time sync
-  int timeRetries = 0;
-  while (time(nullptr) < 100000 && timeRetries < 20) {
-    delay(500);
-    Serial.print(".");
-    timeRetries++;
-  }
-  Serial.println(time(nullptr) > 100000 ? " OK" : " FAILED");
-  
+
   // NMEA UART
   Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
   Serial.println("NMEA0183 UART started on pins RX:" + String(NMEA_RX) + " TX:" + String(NMEA_TX));
-  
+
   // WebSocket setup
   ws.onEvent(onWebSocketEvent);
   server.addHandler(&ws);
   
   // HTTP Routes
-  
+
   // Root UI
   server.on("/", HTTP_GET, handleRoot);
-  
+
+  // Test endpoint to verify server is reachable
+  server.on("/test", HTTP_GET, [](AsyncWebServerRequest* req) {
+    Serial.println("=== TEST ENDPOINT HIT ===");
+    Serial.printf("Client IP: %s\n", req->client()->remoteIP().toString().c_str());
+    req->send(200, "text/plain", "ESP32 SignalK Server is running on port 3000!");
+  });
+
+  server.on("/test", HTTP_POST, [](AsyncWebServerRequest* req) {
+    Serial.println("=== TEST POST ENDPOINT HIT ===");
+    Serial.printf("Client IP: %s\n", req->client()->remoteIP().toString().c_str());
+    req->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"POST received\"}");
+  });
+
   // SignalK discovery
   server.on("/signalk", HTTP_GET, handleSignalKRoot);
-  
+
   // API root
   server.on("/signalk/v1/api", HTTP_GET, handleAPIRoot);
   server.on("/signalk/v1/api/", HTTP_GET, handleAPIRoot);
-  
+
   // Vessels
   server.on("/signalk/v1/api/vessels/self", HTTP_GET, handleVesselsSelf);
   server.on("/signalk/v1/api/vessels/self/", HTTP_GET, handleVesselsSelf);
-  
+
   // Dynamic path handlers
   server.on("^\\/signalk\\/v1\\/api\\/vessels\\/self\\/(.+)$", HTTP_GET, handleGetPath);
-  server.on("^\\/signalk\\/v1\\/api\\/vessels\\/self\\/(.+)$", HTTP_PUT, 
+  server.on("^\\/signalk\\/v1\\/api\\/vessels\\/self\\/(.+)$", HTTP_PUT,
     [](AsyncWebServerRequest* req) {}, NULL, handlePutPath);
   
-  // Admin endpoints
-  server.on("/admin/tokens", HTTP_GET, handleListTokens);
-  server.on("/admin/tokens", HTTP_POST,
-    [](AsyncWebServerRequest* req) {}, NULL, handleCreateToken);
-  
-  // CORS headers for all routes
+  // CORS headers
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
-  
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  // Log ALL incoming requests
+  server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    Serial.println("\n=== INCOMING REQUEST (onRequestBody) ===");
+    Serial.printf("URL: %s\n", request->url().c_str());
+    Serial.printf("Method: ");
+    switch (request->method()) {
+      case HTTP_GET: Serial.println("GET"); break;
+      case HTTP_POST: Serial.println("POST"); break;
+      case HTTP_PUT: Serial.println("PUT"); break;
+      case HTTP_DELETE: Serial.println("DELETE"); break;
+      case HTTP_OPTIONS: Serial.println("OPTIONS"); break;
+      default: Serial.println(request->method()); break;
+    }
+    Serial.printf("Body chunk: index=%d, len=%d, total=%d\n", index, len, total);
+    Serial.println("========================================\n");
+  });
+
+  // Catch-all handler for debugging
+  server.onNotFound([](AsyncWebServerRequest* req) {
+    Serial.println("=== NOT FOUND / NOT IMPLEMENTED ===");
+    Serial.print("Client IP: ");
+    Serial.println(req->client()->remoteIP().toString());
+    Serial.print("URL: ");
+    Serial.println(req->url());
+    Serial.print("Method: ");
+    switch (req->method()) {
+      case HTTP_GET: Serial.println("GET"); break;
+      case HTTP_POST: Serial.println("POST"); break;
+      case HTTP_PUT: Serial.println("PUT"); break;
+      case HTTP_DELETE: Serial.println("DELETE"); break;
+      case HTTP_OPTIONS: Serial.println("OPTIONS"); break;
+      default: Serial.println(req->method()); break;
+    }
+    Serial.print("Content-Type: ");
+    if (req->hasHeader("Content-Type")) {
+      Serial.println(req->header("Content-Type"));
+    } else {
+      Serial.println("(none)");
+    }
+    Serial.println("===================================");
+    req->send(404, "application/json", "{\"error\":\"Not found\"}");
+  });
+
   server.begin();
   Serial.println("\nHTTP Server started");
+
+  Serial.println("\n=== Access URLs ===");
+  Serial.println("SignalK Server: http://192.168.4.1:3000/");
+  Serial.println("SignalK API:    http://192.168.4.1:3000/signalk/v1/api/");
+  Serial.println("WebSocket:      ws://192.168.4.1:3000/signalk/v1/stream");
+  Serial.println("\n=== Connect to WiFi: " + String(AP_SSID) + " ===");
+  Serial.println("Password: " + String(AP_PASSWORD));
+  Serial.println("=====================================\n");
+
+  // Start WiFiManager config portal (non-blocking)
+  Serial.println("\n=== Starting WiFiManager ===");
+  Serial.println("WiFi Config Portal: http://192.168.4.1");
+  Serial.println("Connect to configure WiFi network for internet access");
+  Serial.println("============================\n");
+
+  wm.setDebugOutput(true);
+  wm.setConfigPortalBlocking(false);  // Non-blocking mode
+
+  // Start config portal on demand - always available
+  // This starts the portal immediately and keeps it running
+  wm.startConfigPortal(AP_SSID, AP_PASSWORD);
+
+  Serial.println("WiFiManager portal started on http://192.168.4.1");
+  Serial.println("Portal will remain active for WiFi configuration");
+
+  // Check if WiFi credentials are already saved and connected
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n=== WiFi Client Already Connected ===");
+    Serial.println("Connected to: " + WiFi.SSID());
+    Serial.println("IP Address: " + WiFi.localIP().toString());
+    Serial.println("============================\n");
+
+    // Sync time via NTP
+    Serial.println("Syncing time with NTP...");
+    configTime(0, 0, "pool.ntp.org", "time.ntp.org");
+    int timeRetries = 0;
+    while (time(nullptr) < 100000 && timeRetries < 20) {
+      delay(500);
+      Serial.print(".");
+      timeRetries++;
+    }
+    Serial.println(time(nullptr) > 100000 ? " OK" : " FAILED");
+  }
+
   Serial.println("\n=== System Ready ===\n");
 }
 
@@ -968,6 +949,9 @@ String nmeaBuffer;
 uint32_t lastWsCleanup = 0;
 
 void loop() {
+  // Process WiFiManager (non-blocking)
+  wm.process();
+
   // Read NMEA sentences from Serial1
   while (Serial1.available()) {
     char c = Serial1.read();
@@ -977,25 +961,24 @@ void loop() {
         parseNMEASentence(nmeaBuffer);
       }
       nmeaBuffer = "";
-    } else if (c >= 32 && c <= 126) { // Printable ASCII
+    } else if (c >= 32 && c <= 126) {
       if (nmeaBuffer.length() < 120) {
         nmeaBuffer += c;
       }
     }
   }
-  
+
   // Broadcast WebSocket deltas
   if (ws.count() > 0) {
     broadcastDeltas();
   }
-  
+
   // Cleanup WebSocket clients periodically
   uint32_t now = millis();
   if (now - lastWsCleanup > WS_CLEANUP_MS) {
     lastWsCleanup = now;
     ws.cleanupClients();
   }
-  
-  // Small delay to prevent watchdog issues
+
   delay(1);
 }
