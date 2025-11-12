@@ -1977,21 +1977,32 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
       JsonObject obj = value.as<JsonObject>();
 
       // Extract anchor position
+      bool anchorPositionUpdated = false;
       if (obj.containsKey("anchor")) {
         JsonObject anchor = obj["anchor"];
         if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
           geofence.anchorLat = anchor["lat"];
           geofence.anchorLon = anchor["lon"];
           geofence.anchorTimestamp = millis();
+          anchorPositionUpdated = true;
           Serial.printf("Anchor set: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
         }
         if (anchor.containsKey("radius")) {
           geofence.radius = anchor["radius"];
           Serial.printf("Geofence radius: %.0f m\n", geofence.radius);
         }
-        if (anchor.containsKey("enabled")) {
-          geofence.enabled = anchor["enabled"];
-          Serial.printf("Geofence enabled: %s\n", geofence.enabled ? "true" : "false");
+        // IMPORTANT: Only update geofence.enabled if anchor position is also being set
+        // This prevents depth/wind alarm updates from accidentally enabling geofence
+        if (anchor.containsKey("enabled") && anchorPositionUpdated) {
+          bool newEnabled = anchor["enabled"];
+          if (newEnabled != geofence.enabled) {
+            geofence.enabled = newEnabled;
+            Serial.printf("Geofence enabled changed to: %s\n", geofence.enabled ? "true" : "false");
+          } else {
+            Serial.printf("Geofence enabled unchanged: %s\n", geofence.enabled ? "true" : "false");
+          }
+        } else if (anchor.containsKey("enabled") && !anchorPositionUpdated) {
+          Serial.printf("Ignoring geofence.enabled update - no anchor position in request\n");
         }
       }
 
@@ -2003,8 +2014,13 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
           Serial.printf("Depth threshold: %.1f m\n", depthAlarm.threshold);
         }
         if (depth.containsKey("alarm")) {
-          depthAlarm.enabled = depth["alarm"];
-          Serial.printf("Depth alarm enabled: %s\n", depthAlarm.enabled ? "true" : "false");
+          bool newEnabled = depth["alarm"];
+          if (newEnabled != depthAlarm.enabled) {
+            depthAlarm.enabled = newEnabled;
+            Serial.printf("Depth alarm enabled changed to: %s\n", depthAlarm.enabled ? "true" : "false");
+          } else {
+            Serial.printf("Depth alarm enabled unchanged: %s\n", depthAlarm.enabled ? "true" : "false");
+          }
         }
       }
 
@@ -2016,8 +2032,13 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
           Serial.printf("Wind threshold: %.1f kn\n", windAlarm.threshold);
         }
         if (wind.containsKey("alarm")) {
-          windAlarm.enabled = wind["alarm"];
-          Serial.printf("Wind alarm enabled: %s\n", windAlarm.enabled ? "true" : "false");
+          bool newEnabled = wind["alarm"];
+          if (newEnabled != windAlarm.enabled) {
+            windAlarm.enabled = newEnabled;
+            Serial.printf("Wind alarm enabled changed to: %s\n", windAlarm.enabled ? "true" : "false");
+          } else {
+            Serial.printf("Wind alarm enabled unchanged: %s\n", windAlarm.enabled ? "true" : "false");
+          }
         }
       }
     }
