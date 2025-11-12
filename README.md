@@ -16,6 +16,8 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 ### Data Sources
 
 #### 1. NMEA 2000 (CAN Bus)
+- **Hardware**: Built-in CAN transceiver (SN65HVD231) on GPIO 27/26
+- **Connection**: Use LEFT green terminal block (H/L)
 - **Supported PGNs**:
   - 129025: Position (Lat/Lon)
   - 129026: COG & SOG
@@ -24,21 +26,28 @@ A complete marine data acquisition and distribution system based on ESP32, desig
   - 130310: Environmental Data (Temperature, Pressure)
 - **Mode**: Listen-only (won't interfere with existing network)
 - **Auto-alarm integration** for wind and depth
+- **📖 See [NMEA2000-GUIDE.md](NMEA2000-GUIDE.md) for detailed connection instructions**
 
-#### 2. GPS Module (NMEA 0183 via UART)
-- Supports GGA, RMC, VTG, HDT sentences
-- Automatic position, speed, and course updates
-- Configurable baud rate (default 9600)
+#### 2. NMEA 0183 Instruments (RS485)
+- **Hardware**: Built-in RS485 transceiver (MAX13487EESA+) on GPIO 21/22
+- **Connection**: Use RIGHT green terminal block (A/B) **OR** GPIO header pins (32/33)
+- **Configurable**: Switch between RS485 terminals or GPIO header via `#define USE_RS485_FOR_NMEA`
+- **Supports**: Marine instruments (depth sounders, wind sensors, AIS, etc.)
+- **Baud**: 4800 bps (standard marine) or 38400 bps (high-speed)
+- **📖 See [RS485-GUIDE.md](RS485-GUIDE.md) for RS485 terminal block usage**
 
-#### 3. NMEA 0183 Instruments (UART)
-- Standard marine instruments connection
-- Supports: GPS, Wind, Depth, Speed, Heading, Temperature
-- 4800 baud (standard marine)
+#### 3. GPS Module (NMEA 0183 via UART)
+- **Connection**: Dedicated Serial2 on GPIO 25 (RX) / 18 (TX)
+- **Supports**: Standard GPS modules (NEO-6M, NEO-M8N, etc.)
+- **Sentences**: GGA, RMC, VTG, HDT
+- **Baud**: 9600 bps (configurable)
+- **Automatic**: Position, speed, and course updates
 
 #### 4. I2C Environmental Sensors
+- **Hardware**: I2C bus on GPIO 5 (SDA) / 32 (SCL)
 - **BME280**: Temperature, Barometric Pressure, Humidity
-- Auto-detection at I2C addresses 0x76 and 0x77
-- Inside cabin environmental monitoring
+- **Auto-detection**: Addresses 0x76 and 0x77
+- **Use Case**: Inside cabin environmental monitoring
 
 ### Alarms & Notifications
 
@@ -68,17 +77,23 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 
 ### Recommended Board
 **LILYGO TTGO T-CAN485 ESP32**
-- ESP32 MCU with 4MB Flash
-- Built-in CAN transceiver (SN65HVD231)
-- Built-in RS485 transceiver (MAX13487EESA+)
-- SD card slot
+- ESP32-WROOM-32 MCU with 4MB Flash
+- Built-in CAN transceiver (SN65HVD231) for NMEA 2000
+- Built-in RS485 transceiver (MAX13487EESA+) for NMEA 0183
+- 12-pin GPIO header for external connections
+- SD card slot (not used in this firmware)
 - USB-C programming interface
 - 5-12V power input (perfect for marine 12V systems)
+- Onboard RGB LED (WS2812)
+
+**Purchase**: Available on [LILYGO Store](https://www.lilygo.cc/) or AliExpress
 
 ### Optional Modules
-- **GPS Module**: Any NMEA 0183 UART GPS (NEO-6M, NEO-M8N, etc.)
-- **BME280 Sensor**: I2C environmental sensor
+- **GPS Module**: Any NMEA 0183 UART GPS (NEO-6M, NEO-M8N, etc.) - ~$10
+- **BME280 Sensor**: I2C environmental sensor - ~$5
 - **12V Power Supply**: For marine installations
+- **NMEA 2000 T-Connector**: For connecting to existing N2K network
+- **NMEA 2000 Drop Cable**: For network connection
 
 ## Pin Configuration
 
@@ -89,85 +104,143 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 │      LILYGO TTGO T-CAN485 ESP32        │
 ├─────────────────────────────────────────┤
 │                                         │
-│  CAN Bus (Built-in)                     │
-│  ├─ TX:  GPIO 5                         │
-│  └─ RX:  GPIO 35                        │
+│  📍 NMEA 2000 CAN Bus (Built-in)       │
+│  ├─ TX:    GPIO 27  (Hardware fixed)    │
+│  ├─ RX:    GPIO 26  (Hardware fixed)    │
+│  └─ Term:  LEFT terminal block (H/L)    │
 │                                         │
-│  NMEA 0183 UART (Serial1)               │
-│  ├─ RX:  GPIO 16                        │
-│  └─ TX:  GPIO 17                        │
+│  📍 NMEA 0183 RS485 (Configurable)     │
+│     OPTION A: Built-in RS485            │
+│  ├─ RX:    GPIO 21  (RS485 terminal)    │
+│  ├─ TX:    GPIO 22  (RS485 terminal)    │
+│  ├─ DE:    GPIO 17  (Driver Enable)     │
+│  ├─ EN:    GPIO 19  (Chip Enable)       │
+│  └─ Term:  RIGHT terminal block (A/B)   │
 │                                         │
-│  GPS Module (Serial2)                   │
-│  ├─ RX:  GPIO 25                        │
-│  └─ TX:  GPIO 26                        │
+│     OPTION B: GPIO Header UART          │
+│  ├─ RX:    GPIO 32  (Pin 3)             │
+│  ├─ TX:    GPIO 33  (Pin 4)             │
+│  └─ Use:   When RS485 not needed        │
 │                                         │
-│  I2C Sensors                            │
-│  ├─ SDA: GPIO 18                        │
-│  └─ SCL: GPIO 19                        │
+│  📍 GPS Module (Serial2)                │
+│  ├─ RX:    GPIO 25  (Pin 5)             │
+│  ├─ TX:    GPIO 18  (Pin 6)             │
+│  └─ Power: 3.3V (Pin 1), GND (Pin 2)    │
 │                                         │
-│  RS485 (Built-in)                       │
-│  ├─ RX:  GPIO 21                        │
-│  ├─ TX:  GPIO 22                        │
-│  └─ DE:  GPIO 17                        │
+│  📍 I2C Sensors                         │
+│  ├─ SDA:   GPIO 5   (Pin 7)             │
+│  ├─ SCL:   GPIO 32  (Pin 3)             │
+│  └─ Note:  SCL shares with NMEA RX      │
+│            (OK when using RS485 mode)   │
 │                                         │
-│  RGB LED:    GPIO 4                     │
-│  Power:      5-12V DC                   │
+│  📍 Other Hardware                      │
+│  ├─ RGB LED:     GPIO 4                 │
+│  ├─ Power En:    GPIO 16                │
+│  ├─ CAN SE:      GPIO 23                │
+│  └─ SD Card:     GPIO 2,13,14,15        │
+│                                         │
+│  📍 Power                               │
+│  ├─ Input:  5-12V DC or USB-C           │
+│  ├─ Output: 3.3V / 5V regulated         │
+│  └─ Current: ~200mA typical             │
 │                                         │
 └─────────────────────────────────────────┘
+
+📖 For detailed pin identification, see PINOUT.md
+📖 For RS485 terminal usage, see RS485-GUIDE.md
+📖 For NMEA 2000 wiring, see NMEA2000-GUIDE.md
 ```
+
+### Connection Mode Selection
+
+**Choose your NMEA 0183 connection method** in `src/main.cpp` (line ~57):
+
+```cpp
+#define USE_RS485_FOR_NMEA    // ← Leave uncommented to use RS485 terminal blocks
+// #define USE_RS485_FOR_NMEA // ← Comment out to use GPIO header (pins 32/33)
+```
+
+**When to use RS485 terminals:**
+- Modern marine instruments with RS485 output
+- Long cable runs (up to 1200m)
+- Multiple devices on same bus
+- Noisy marine electrical environment
+
+**When to use GPIO header:**
+- Simple GPS modules (TTL level)
+- Short cable runs (<15m)
+- Single device connection
+- Testing on breadboard
 
 ## Connection Diagrams
 
-### GPS Module Connection
+### NMEA 2000 (CAN Bus) Connection
 
 ```
-GPS Module (NEO-6M/NEO-M8N)
+NMEA 2000 Backbone
+       │
+       ├──┬── T-Connector (M12 5-pin female)
+       │  │
+       │  │   Drop Cable
+       │  │   (Max 6m)
+       │  │
+       │  ├─ WHITE (CAN_H) ──────→ H │ T-CAN485
+       │  ├─ BLUE  (CAN_L) ──────→ L │ LEFT Terminal
+       │  ├─ RED   (12V)   ──────→ 12V Power Input
+       │  └─ BLACK (GND)   ──────→ GND
+       │
+       └─── (Continues to other devices)
+
+Add 120Ω terminator at EACH END of backbone
+```
+
+**📖 Full details in [NMEA2000-GUIDE.md](NMEA2000-GUIDE.md)**
+
+### NMEA 0183 via RS485 Terminal Blocks
+
+```
+Marine Instrument          T-CAN485
+(RS485 Output)             RIGHT Terminal Block
+─────────────────────────────────────────────
+  A / Data+ / TX+  ──────→  A (RS485+)
+  B / Data- / TX-  ──────→  B (RS485-)
+  GND              ──────→  GND
+  12V (if needed)  ──────→  12V Input
+```
+
+**📖 Full details in [RS485-GUIDE.md](RS485-GUIDE.md)**
+
+### GPS Module Connection (GPIO Header)
+
+```
+GPS Module (NEO-6M/NEO-M8N)    T-CAN485 GPIO Header
 ┌─────────────┐
 │   GPS       │
 │             │
-│  VCC ●──────┼──── 3.3V
-│  GND ●──────┼──── GND
-│  TX  ●──────┼──── GPIO 25 (RX)
-│  RX  ●──────┼──── GPIO 26 (TX) [Optional]
+│  VCC ●──────┼──────────────→ 3.3V (Pin 1)
+│  GND ●──────┼──────────────→ GND  (Pin 2)
+│  TX  ●──────┼──────────────→ GPIO 25 (Pin 5) - RX
+│  RX  ●──────┼──────────────→ GPIO 18 (Pin 6) - TX [Optional]
 │             │
 └─────────────┘
 ```
 
-### BME280 Sensor Connection
+### BME280 Sensor Connection (GPIO Header)
 
 ```
-BME280 Sensor
+BME280 Sensor              T-CAN485 GPIO Header
 ┌─────────────┐
 │   BME280    │
 │             │
-│  VCC ●──────┼──── 3.3V
-│  GND ●──────┼──── GND
-│  SDA ●──────┼──── GPIO 18
-│  SCL ●──────┼──── GPIO 19
+│  VCC ●──────┼──────────────→ 3.3V (Pin 1)
+│  GND ●──────┼──────────────→ GND  (Pin 2)
+│  SDA ●──────┼──────────────→ GPIO 5  (Pin 7)
+│  SCL ●──────┼──────────────→ GPIO 32 (Pin 3)
 │             │
 └─────────────┘
-```
 
-### NMEA 2000 Connection
-
-```
-NMEA 2000 Network
-┌─────────────────────────┐
-│  Marine Electronics     │
-│  (Chartplotter, MFD,    │
-│   Instruments, etc.)    │
-│                         │
-│    CANH ●───────●       │
-│    CANL ●───────●       │
-│                         │
-└─────────────┬───────────┘
-              │
-        120Ω Termination
-              │
-┌─────────────┴───────────┐
-│  T-CAN485 Board         │
-│  (Built-in CAN Bus)     │
-└─────────────────────────┘
+Note: GPIO 32 is shared with NMEA RX when using GPIO header mode.
+      Use RS485 mode for NMEA if connecting BME280.
 ```
 
 ### Complete System Diagram
@@ -182,23 +255,25 @@ NMEA 2000 Network
                     │                          │
    ┌────────────────┤  LILYGO T-CAN485 ESP32  ├────────────────┐
    │                │                          │                │
-   │                └──────────────────────────┘                │
-   │                                                            │
-   │ NMEA 2000 (CAN)                                   GPS (UART)
-   │                                                            │
+   │   LEFT         └──────────────────────────┘     RIGHT      │
+   │   Terminal                                      Terminal   │
+   │   (CAN H/L)                                     (RS485 A/B)│
+   │                                                             │
+   │ NMEA 2000 (CAN)                                NMEA 0183   │
+   │                                                (RS485)     │
 ┌──▼───────────────┐                              ┌────────────▼─────┐
-│ Marine Network   │                              │  NEO-M8N GPS     │
-│ - Chartplotter   │                              │  Module          │
+│ Marine Network   │                              │  Wind/Depth/AIS  │
+│ - Chartplotter   │                              │  Instruments     │
+│ - MFD            │                              │  (RS485 Output)  │
 │ - Wind Sensor    │                              └──────────────────┘
 │ - Depth Sounder  │
 │ - Engine Data    │                  ┌─────────────────────┐
-└──────────────────┘                  │  BME280 Sensor      │
-                                      │  (Temperature,      │
-┌──────────────────┐                  │   Pressure,         │
-│ NMEA 0183        │                  │   Humidity)         │
-│ Instruments      ├──────────────────┤                     │
-│ (4800 baud)      │     Serial1      └─────────────────────┘
-└──────────────────┘
+└──────────────────┘                  │  GPIO Header        │
+                                      │  12-pin connector   │
+                                      │                     │
+                                      │  - GPS Module       │
+                                      │  - BME280 Sensor    │
+                                      └─────────────────────┘
                                                │
                                                │ WiFi
                     ┌──────────────────────────▼──────────┐
@@ -234,7 +309,7 @@ NMEA 2000 Network
 
 4. **Monitor serial output**
    ```bash
-   pio device monitor
+   pio device monitor --baud 115200
    ```
 
 ### First Boot Configuration
@@ -252,6 +327,30 @@ NMEA 2000 Network
 3. **Access SignalK Server**
    - Find IP address in serial monitor or use `signalk.local`
    - Open browser: `http://signalk.local:3000` or `http://[IP]:3000`
+
+### Verify Hardware Initialization
+
+Check serial monitor for successful initialization:
+
+```
+=== ESP32 SignalK Server ===
+
+Starting NMEA UART...
+NMEA0183 via RS485 started on terminal blocks A/B
+Using built-in RS485 transceiver (GPIO 21/22)
+
+Starting GPS module...
+GPS UART started on pins RX:25 TX:18
+
+Initializing NMEA2000...
+CAN device ready
+NMEA2000 initialized successfully
+
+Initializing I2C sensors...
+BME280 sensor found!  (or "No BME280 sensor detected")
+
+=== SIGNALK SERVER READY ===
+```
 
 ## API Endpoints
 
@@ -313,43 +412,60 @@ Body: {"token": "ExponentPushToken[...]"}
 
 ## Configuration
 
-### WiFi Settings
-- **AP SSID**: `ESP32-SignalK` (change in main.cpp `AP_SSID`)
-- **AP Password**: `signalk123` (change in main.cpp `AP_PASSWORD`)
-- **Portal**: Always available at `http://192.168.4.1`
+### Choosing NMEA 0183 Connection Method
 
-### Serial Port Settings
+Edit `src/main.cpp` around line 57:
+
 ```cpp
-// NMEA 0183 UART (Serial1)
-#define NMEA_RX 16
-#define NMEA_TX 17
-#define NMEA_BAUD 4800
+// Uncomment to use RS485 terminal blocks (A/B)
+#define USE_RS485_FOR_NMEA
+
+// Comment out to use GPIO header pins (32/33)
+// #define USE_RS485_FOR_NMEA
+```
+
+After changing, rebuild and upload:
+```bash
+pio run --target upload
+```
+
+### Pin Definitions (Advanced)
+
+```cpp
+// NMEA 0183 RS485 Mode
+#ifdef USE_RS485_FOR_NMEA
+  #define NMEA_RX 21                 // RS485 terminal block
+  #define NMEA_TX 22
+  #define NMEA_DE 17                 // Driver Enable
+  #define NMEA_DE_ENABLE 19          // Chip Enable
+  #define NMEA_BAUD 4800
+#else
+  // NMEA 0183 GPIO Header Mode
+  #define NMEA_RX 32                 // GPIO header pin 3
+  #define NMEA_TX 33                 // GPIO header pin 4
+  #define NMEA_BAUD 4800
+#endif
 
 // GPS Module (Serial2)
-#define GPS_RX 25
-#define GPS_TX 26
+#define GPS_RX 25                  // GPIO header pin 5
+#define GPS_TX 18                  // GPIO header pin 6
 #define GPS_BAUD 9600
-```
 
-### CAN Bus Settings
-```cpp
-// NMEA 2000 CAN Bus
-#define CAN_TX 5
-#define CAN_RX 35
-```
+// CAN Bus (NMEA 2000) - Hardware fixed, DON'T CHANGE
+#define CAN_TX 27
+#define CAN_RX 26
 
-### I2C Settings
-```cpp
 // I2C Sensors
-#define I2C_SDA 18
-#define I2C_SCL 19
+#define I2C_SDA 5                  // GPIO header pin 7
+#define I2C_SCL 32                 // GPIO header pin 3 (shared with NMEA RX)
 ```
 
 ### Alarm Thresholds
+
+Default values (configurable via API):
 ```cpp
-// Default values (configurable via API)
-Geofence radius: 100 meters
-Wind threshold: 20 knots
+Geofence radius: 40 meters
+Wind threshold: 40 knots
 Depth threshold: 2 meters
 ```
 
@@ -373,38 +489,6 @@ Depth threshold: 2 meters
 4. **Register for Push Notifications**
    - App automatically registers Expo push token
    - Notifications enabled for all alarms
-
-## Alarm Configuration
-
-### Geofence Setup
-
-**Set Anchor Position:**
-```bash
-curl -X POST http://signalk.local:3000/api/geofence/set-anchor
-```
-
-**Enable Geofence:**
-```bash
-curl -X POST http://signalk.local:3000/api/geofence/enable \
-  -H "Content-Type: application/json" \
-  -d '{"enabled": true, "radius": 100}'
-```
-
-### Wind Alarm Setup
-
-Wind alarms are configured in the code:
-```cpp
-windAlarm.threshold = 20.0;  // knots
-windAlarm.enabled = true;
-```
-
-### Depth Alarm Setup
-
-Depth alarms are configured in the code:
-```cpp
-depthAlarm.threshold = 2.0;  // meters
-depthAlarm.enabled = true;
-```
 
 ## SignalK Paths
 
@@ -440,9 +524,8 @@ notifications.depth.alarm         Depth alarm state
 
 Each SignalK value includes a `$source` field indicating where the data came from:
 
-- `nmea0183.GPS`: Serial1 NMEA 0183 GPS
-- `nmea0183.Instrument`: Serial1 NMEA 0183 instruments
-- `nmea2000.can`: NMEA 2000 CAN bus
+- `nmea0183.Serial1`: NMEA 0183 via RS485 or GPIO header
+- `nmea2000.25`: NMEA 2000 CAN bus (device address 25)
 - `gps.serial2`: GPS module on Serial2
 - `i2c.bme280`: BME280 I2C sensor
 
@@ -458,48 +541,80 @@ Each SignalK value includes a `$source` field indicating where the data came fro
 3. Reconfigure WiFi credentials
 4. Check serial monitor for connection status
 
-### CAN Bus Not Working
+### NMEA 2000 Not Working
 
 **Problem**: No NMEA 2000 data received
 
 **Solution**:
-1. Check CAN bus termination (120Ω required)
-2. Verify CAN_H and CAN_L connections
+1. Check CAN bus termination (120Ω at BOTH ends of backbone)
+2. Verify WHITE → H, BLUE → L (not swapped)
 3. Check serial monitor for "NMEA2000 initialized successfully"
-4. Verify NMEA 2000 network is powered and active
+4. Verify NMEA 2000 network is powered (12V present)
+5. Use multimeter: H and L should each read ~2.5V relative to ground
+6. **📖 See [NMEA2000-GUIDE.md](NMEA2000-GUIDE.md) troubleshooting section**
+
+### RS485 NMEA 0183 Not Working
+
+**Problem**: No data from RS485 instruments
+
+**Solution**:
+1. Verify `#define USE_RS485_FOR_NMEA` is uncommented in main.cpp
+2. Check A → A, B → B (polarity matters!)
+3. Verify instruments are powered and transmitting
+4. Try swapping A and B if polarity is unclear
+5. Check baud rate matches instrument (4800 or 38400)
+6. **📖 See [RS485-GUIDE.md](RS485-GUIDE.md) troubleshooting section**
 
 ### GPS Not Working
 
 **Problem**: No position data
 
 **Solution**:
-1. Check GPS module power (3.3V)
+1. Check GPS module power (3.3V on Pin 1)
 2. Verify GPS TX → ESP32 GPIO 25 connection
-3. Ensure GPS has clear sky view
+3. Ensure GPS has clear sky view (outdoor or window)
 4. Check serial monitor for GPS sentences
-5. Wait 30-60 seconds for GPS fix
+5. Wait 30-60 seconds for initial GPS fix (cold start)
+6. **📖 See [PINOUT.md](PINOUT.md) for GPIO header pinout**
+
+### I2C Sensor Not Detected
+
+**Problem**: "No BME280 sensor detected"
+
+**Solution**:
+1. Normal if sensor not connected (system works without it)
+2. If sensor connected, verify I2C wiring:
+   - SDA → GPIO 5 (Pin 7)
+   - SCL → GPIO 32 (Pin 3)
+   - VCC → 3.3V (Pin 1)
+   - GND → GND (Pin 2)
+3. Check I2C address (0x76 or 0x77)
+4. Verify sensor not damaged with I2C scanner
 
 ### Push Notifications Not Working
 
 **Problem**: Mobile app not receiving notifications
 
 **Solution**:
-1. Verify Expo token registration: Check serial monitor
+1. Verify Expo token registration in serial monitor
 2. Ensure mobile app has notification permissions
 3. Test alarm trigger manually
 4. Check WiFi connectivity
 5. Verify 3-second rate limiting isn't blocking messages
 
-### Serial Monitor Showing Errors
+### Serial Monitor Errors
 
 **Error**: `WiFi connection lost`
 **Solution**: WiFi auto-reconnects every 5 seconds. Check router signal strength.
 
 **Error**: `NMEA2000 initialization failed`
-**Solution**: Check CAN bus wiring and termination resistors.
+**Solution**: Check CAN bus wiring and termination resistors (120Ω).
+
+**Error**: `CAN: Bus-off state`
+**Solution**: Too many CAN errors. Check termination, verify no shorts between H and L.
 
 **Error**: `No BME280 sensor detected`
-**Solution**: Normal if sensor not connected. Verify I2C wiring if sensor is present.
+**Solution**: Normal if sensor not connected. Check I2C wiring if sensor is present.
 
 ## Performance
 
@@ -507,8 +622,16 @@ Each SignalK value includes a `$source` field indicating where the data came fro
 - **Flash Usage**: ~41.9% (1.32MB / 3.14MB)
 - **WiFi Reconnect**: Every 5 seconds if disconnected
 - **Sensor Update Rate**: 2 seconds (I2C sensors)
+- **NMEA2000 Processing**: Continuous (250 kbps CAN bus)
 - **WebSocket Delta Rate**: 500ms minimum
 - **Push Notification Rate**: 3 seconds per alarm type
+
+## Documentation
+
+- **[README.md](README.md)** - This file (overview and getting started)
+- **[PINOUT.md](PINOUT.md)** - Detailed GPIO pin identification and usage
+- **[RS485-GUIDE.md](RS485-GUIDE.md)** - RS485 terminal block connection guide
+- **[NMEA2000-GUIDE.md](NMEA2000-GUIDE.md)** - Complete NMEA 2000 installation guide
 
 ## Development
 
@@ -522,7 +645,7 @@ pip install platformio
 git clone [your-repo-url]
 cd esp32-signalk
 
-# Install dependencies
+# Install dependencies (automatic)
 pio lib install
 
 # Build
@@ -540,40 +663,51 @@ pio device monitor --baud 115200
 ```
 esp32-signalk/
 ├── src/
-│   └── main.cpp           # Main application code
-├── platformio.ini         # PlatformIO configuration
-└── README.md             # This file
+│   └── main.cpp              # Main application code (~3800 lines)
+├── platformio.ini            # PlatformIO configuration
+├── README.md                 # This file (overview)
+├── PINOUT.md                 # GPIO pin identification guide
+├── RS485-GUIDE.md            # RS485 connection guide
+└── NMEA2000-GUIDE.md         # NMEA 2000 connection guide
 ```
 
 ### Library Dependencies
 
-- WiFiManager 2.0.17
-- ESPAsyncWebServer
-- AsyncTCP
-- ArduinoJson 6.21.5
-- NMEA2000-library
-- NMEA2000_esp32
-- Adafruit BME280 Library
-- Adafruit Unified Sensor
-- Adafruit BusIO
+- WiFiManager 2.0.17 (WiFi configuration portal)
+- ESPAsyncWebServer (High-performance web server)
+- AsyncTCP (Async TCP library)
+- ArduinoJson 6.21.5 (JSON parsing)
+- NMEA2000-library (Timo Lappalainen's NMEA 2000 stack)
+- NMEA2000_esp32 (ESP32 CAN driver)
+- Adafruit BME280 Library (I2C sensor)
+- Adafruit Unified Sensor (Sensor abstraction)
+- Adafruit BusIO (I2C/SPI abstraction)
 
 ### Partition Scheme
 
 Uses `huge_app.csv` partition table:
-- **App**: 3MB (OTA support)
-- **NVS**: 20KB (settings storage)
-- **No SPIFFS**: All storage for application
+- **App 0**: 3MB (current firmware)
+- **App 1**: 3MB (OTA updates - not yet implemented)
+- **NVS**: 20KB (WiFi settings, tokens, alarms)
+- **OTA Data**: 8KB (OTA metadata)
+- **No SPIFFS**: All flash space dedicated to application
 
 ## Future Enhancements
 
-- [ ] RS485 NMEA 0183 support (requires additional UART)
+- [x] RS485 NMEA 0183 support
+- [x] NMEA 2000 CAN bus support
+- [x] GPS module integration
+- [x] I2C sensor support (BME280)
+- [x] Comprehensive documentation
 - [ ] SD card data logging
 - [ ] More NMEA 2000 PGNs (engine, rudder, AIS)
 - [ ] Compass/IMU support (heel, pitch, roll)
-- [ ] NMEA 0183 output (autopilot integration)
-- [ ] Web-based alarm configuration
+- [ ] NMEA 0183 output for autopilot
+- [ ] Web-based alarm configuration UI
 - [ ] Historical data graphs
 - [ ] AIS target tracking
+- [ ] OTA firmware updates
+- [ ] NMEA 2000 transmission mode
 
 ## License
 
@@ -585,20 +719,35 @@ This project is open source. Feel free to use, modify, and distribute.
 - **SignalK Protocol**: SignalK Project
 - **ESP32 Arduino Core**: Espressif Systems
 - **WiFiManager**: tzapu
+- **Hardware**: LILYGO (Xinyuan Technology)
 
 ## Support
 
 For issues, questions, or contributions:
-- Check serial monitor output first
-- Review this README thoroughly
-- Open an issue on GitHub
+1. Check serial monitor output first
+2. Review this README and relevant guide documents
+3. Check the documentation:
+   - [PINOUT.md](PINOUT.md) for pin identification
+   - [RS485-GUIDE.md](RS485-GUIDE.md) for RS485 connections
+   - [NMEA2000-GUIDE.md](NMEA2000-GUIDE.md) for CAN bus setup
+4. Open an issue on GitHub
 
 ## Safety Notice
 
 ⚠️ **This system is for informational purposes only. Always use official marine navigation equipment for critical safety decisions. This device should supplement, not replace, proper marine navigation instruments.**
 
+**Marine Environment Considerations:**
+- Use waterproof enclosures for all electronics
+- Properly fuse all power connections
+- Use marine-grade wire and connectors
+- Follow ABYC electrical standards
+- Test thoroughly before relying on data
+- Maintain redundant navigation systems
+
 ---
 
 **Built with ❤️ for the marine community**
 
-*Last Updated: 2025*
+*Last Updated: November 2025*
+*Board: LILYGO TTGO T-CAN485*
+*Firmware Version: 1.0*

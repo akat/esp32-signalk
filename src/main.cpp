@@ -36,29 +36,52 @@
 #include <Adafruit_BME280.h>
 
 // ====== CONFIGURATION ======
-// LILYGO T-CAN485 Pin Definitions
-#define NMEA_RX 16                 // Serial1 RX (NMEA 0183 UART)
-#define NMEA_TX 17                 // Serial1 TX (NMEA 0183 UART)
-#define NMEA_BAUD 4800
+// LILYGO T-CAN485 Pin Definitions (CORRECTED FOR ACTUAL HARDWARE!)
+//
+// IMPORTANT: The T-CAN485 has specific pins already assigned:
+//   - GPIO 2,13,14,15: SD Card (used by hardware)
+//   - GPIO 4: WS2812 RGB LED (used by hardware)
+//   - GPIO 16: ME2107 Power Enable (used by hardware)
+//   - GPIO 17,19: RS485 Control (used by hardware)
+//   - GPIO 21,22: RS485 RX/TX (used by hardware)
+//   - GPIO 23,26,27: CAN Bus (used by hardware)
+//
+// Available pins on 12-pin GPIO header: 5, 18, 25, 32, 33, 34, 35, 36, 39
+// (Note: GPIO 34-39 are input-only)
 
-// GPS Module on Serial2
-#define GPS_RX 25                  // Serial2 RX for GPS module
-#define GPS_TX 26                  // Serial2 TX for GPS module
+// ====== CHOOSE YOUR NMEA 0183 CONNECTION METHOD ======
+// Option A: Use built-in RS485 for NMEA 0183 (for modern marine instruments with RS485)
+// Option B: Use GPIO header pins for NMEA 0183 (for TTL-level devices)
+//
+// Uncomment the line below to use RS485 terminal blocks for NMEA 0183:
+#define USE_RS485_FOR_NMEA    // ← Comment this line to use GPIO header instead
+
+#ifdef USE_RS485_FOR_NMEA
+  // OPTION A: NMEA 0183 via RS485 (Built-in - Use green terminal blocks A/B)
+  #define NMEA_RX 21                 // Serial1 RX (RS485 built-in)
+  #define NMEA_TX 22                 // Serial1 TX (RS485 built-in)
+  #define NMEA_DE 17                 // RS485 Driver Enable (DE/RE)
+  #define NMEA_DE_ENABLE 19          // RS485 Chip Enable
+  #define NMEA_BAUD 4800
+#else
+  // OPTION B: NMEA 0183 via GPIO Header (for standard TTL UART devices)
+  #define NMEA_RX 32                 // Serial1 RX (GPIO Header Pin)
+  #define NMEA_TX 33                 // Serial1 TX (GPIO Header Pin)
+  #define NMEA_BAUD 4800
+#endif
+
+// GPS Module on Serial2 - Using free GPIO pins from 12-pin header
+#define GPS_RX 25                  // Serial2 RX for GPS module - GPIO Header Pin
+#define GPS_TX 18                  // Serial2 TX for GPS module - GPIO Header Pin
 #define GPS_BAUD 9600
 
-// RS485 on Serial3 (NMEA 0183 via RS485)
-#define RS485_RX 21                // Serial3 RX (RS485 module)
-#define RS485_TX 22                // Serial3 TX (RS485 module)
-#define RS485_DE 17                // RS485 Driver Enable (DE/RE pin)
-#define RS485_BAUD 4800
+// CAN Bus (NMEA 2000) - Built-in on T-CAN485, Hardware pins, DON'T CHANGE!
+#define CAN_TX 27                  // CAN TX - SN65HVD231 (fixed hardware pin)
+#define CAN_RX 26                  // CAN RX - SN65HVD231 (fixed hardware pin)
 
-// CAN Bus (NMEA 2000) - Uses ESP32 TWAI (built-in CAN controller)
-#define CAN_TX 5                   // CAN TX (connected to SN65HVD231)
-#define CAN_RX 35                  // CAN RX (connected to SN65HVD231) - Using GPIO 35
-
-// I2C Sensors (default ESP32 I2C pins, can be changed)
-#define I2C_SDA 18                 // I2C Data
-#define I2C_SCL 19                 // I2C Clock
+// I2C Sensors - Using free GPIO pins from 12-pin header
+#define I2C_SDA 5                  // I2C Data - GPIO Header Pin
+#define I2C_SCL 32                 // I2C Clock - GPIO Header Pin (free when using RS485 for NMEA)
 
 // RGB LED (conflicts with CAN if using GPIO 4)
 #define RGB_LED_PIN 4              // WS2812 RGB LED on T-CAN485
@@ -3355,17 +3378,26 @@ void setup() {
 
   // NMEA UART (Serial1)
   Serial.println("Starting NMEA UART...");
-  Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
-  Serial.println("NMEA0183 UART started on pins RX:" + String(NMEA_RX) + " TX:" + String(NMEA_TX));
+
+  #ifdef USE_RS485_FOR_NMEA
+    // Configure RS485 control pins
+    pinMode(NMEA_DE, OUTPUT);
+    digitalWrite(NMEA_DE, LOW);  // Receive mode (DE/RE low)
+    pinMode(NMEA_DE_ENABLE, OUTPUT);
+    digitalWrite(NMEA_DE_ENABLE, LOW);  // Enable chip (inverted logic)
+
+    Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
+    Serial.println("NMEA0183 via RS485 started on terminal blocks A/B");
+    Serial.println("Using built-in RS485 transceiver (GPIO 21/22)");
+  #else
+    Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
+    Serial.println("NMEA0183 UART started on GPIO header pins RX:" + String(NMEA_RX) + " TX:" + String(NMEA_TX));
+  #endif
 
   // GPS Module (Serial2)
   Serial.println("Starting GPS module...");
   Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
   Serial.println("GPS UART started on pins RX:" + String(GPS_RX) + " TX:" + String(GPS_TX));
-
-  // Note: RS485 support requires hardware serial - can be added if GPS not used
-  // pinMode(RS485_DE, OUTPUT);
-  // digitalWrite(RS485_DE, LOW);
 
   // Initialize NMEA2000 CAN Bus
   initNMEA2000();
