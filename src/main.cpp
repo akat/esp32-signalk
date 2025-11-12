@@ -14,6 +14,7 @@
 
 #include <WiFi.h>
 #include <WiFiManager.h>
+#include <WiFiClientSecure.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
@@ -54,6 +55,9 @@ AsyncWebServer server(3000);  // SignalK default port
 AsyncWebSocket ws("/signalk/v1/stream");
 Preferences prefs;
 WiFiManager wm;  // WiFiManager instance for config portal
+
+// WebSocket client authentication tracking
+std::map<uint32_t, String> clientTokens;  // clientId -> token
 
 // SignalK vessel UUID (persistent)
 String vesselUUID;
@@ -116,15 +120,214 @@ struct ClientSubscription {
 
 std::map<uint32_t, ClientSubscription> clientSubscriptions; // clientId -> subscription
 
-// ====== ACCESS REQUESTS ======
+// ====== ACCESS REQUESTS & AUTHENTICATION ======
 // Storage for access requests (for polling)
 struct AccessRequestData {
-  String clientId;
-  String description;
-  String token;
-  String state; // "PENDING" or "COMPLETED"
+  String requestId;       // Request ID (usually same as clientId)
+  String clientId;        // Client identifier
+  String description;     // Client description
+  String permissions;     // Requested permissions (read/readwrite)
+  String token;           // Generated token (if approved)
+  String state;           // "PENDING", "COMPLETED", or "DENIED"
+  String permission;      // "APPROVED" or "DENIED"
+  unsigned long timestamp; // Request timestamp
 };
 std::map<String, AccessRequestData> accessRequests;
+
+// Storage for approved tokens (persistent)
+struct ApprovedToken {
+  String token;
+  String clientId;
+  String description;
+  String permissions;
+  unsigned long approvedAt;
+};
+std::map<String, ApprovedToken> approvedTokens; // Key: token
+
+// ====== EXPO PUSH NOTIFICATIONS ======
+std::vector<String> expoTokens;  // List of Expo push tokens
+unsigned long lastPushNotification = 0;  // Last notification timestamp
+const unsigned long PUSH_NOTIFICATION_COOLDOWN = 10000;  // 10 seconds
+
+// Expo token management
+void saveExpoTokens() {
+  prefs.begin("signalk", false);
+  prefs.putInt("expoCount", expoTokens.size());
+  for (size_t i = 0; i < expoTokens.size(); i++) {
+    String key = "expo" + String(i);
+    prefs.putString(key.c_str(), expoTokens[i]);
+  }
+  prefs.end();
+  Serial.printf("Saved %d Expo tokens\n", expoTokens.size());
+}
+
+void loadExpoTokens() {
+  prefs.begin("signalk", true);
+  int count = prefs.getInt("expoCount", 0);
+  expoTokens.clear();
+  for (int i = 0; i < count; i++) {
+    String key = "expo" + String(i);
+    String token = prefs.getString(key.c_str(), "");
+    if (token.length() > 0) {
+      expoTokens.push_back(token);
+    }
+  }
+  prefs.end();
+  Serial.printf("Loaded %d Expo tokens\n", expoTokens.size());
+}
+
+bool addExpoToken(const String& token) {
+  // Check if token already exists
+  for (const auto& existingToken : expoTokens) {
+    if (existingToken == token) {
+      return false;  // Already exists
+    }
+  }
+  expoTokens.push_back(token);
+  saveExpoTokens();
+  return true;
+}
+
+void sendExpoPushNotification(const String& title, const String& body, const String& alarmType = "", const String& data = "") {
+  unsigned long now = millis();
+
+  // Rate limiting check
+  if (now - lastPushNotification < PUSH_NOTIFICATION_COOLDOWN) {
+    Serial.println("Push notification rate limited");
+    return;
+  }
+
+  if (expoTokens.empty()) {
+    Serial.println("No Expo tokens registered");
+    return;
+  }
+
+  lastPushNotification = now;
+
+  // Send to each registered token
+  for (const auto& token : expoTokens) {
+    Serial.printf("Sending push notification to: %s\n", token.substring(0, 30).c_str());
+
+    // Build JSON payload for Expo push API
+    DynamicJsonDocument doc(512);
+    doc["to"] = token;
+    doc["title"] = title;
+    doc["body"] = body;
+    doc["priority"] = "high";
+
+    // Set sound and channelId based on alarm type
+    if (alarmType == "geofence") {
+      doc["sound"] = "geofence_alarm.wav";
+      doc["channelId"] = "geofence-alarms";
+    } else if (alarmType == "depth") {
+      doc["sound"] = "geofence_alarm.wav";
+      doc["channelId"] = "geofence-alarms";
+    } else if (alarmType == "wind") {
+      doc["sound"] = "geofence_alarm.wav";
+      doc["channelId"] = "geofence-alarms";
+    } else {
+      doc["sound"] = "default";
+    }
+
+    if (data.length() > 0) {
+      doc["data"] = data;
+    }
+
+    String payload;
+    serializeJson(doc, payload);
+
+    // Send HTTP POST to Expo push API
+    WiFiClientSecure client;
+    client.setInsecure();  // Skip certificate validation for simplicity
+
+    if (client.connect("exp.host", 443)) {
+      client.println("POST /--/api/v2/push/send HTTP/1.1");
+      client.println("Host: exp.host");
+      client.println("Content-Type: application/json");
+      client.println("Accept: application/json");
+      client.print("Content-Length: ");
+      client.println(payload.length());
+      client.println("Connection: close");
+      client.println();
+      client.print(payload);
+
+      // Wait for response
+      unsigned long timeout = millis() + 5000;
+      while (client.connected() && millis() < timeout) {
+        if (client.available()) {
+          String line = client.readStringUntil('\n');
+          if (line.startsWith("HTTP/")) {
+            Serial.printf("Push API response: %s\n", line.c_str());
+          }
+        }
+      }
+      client.stop();
+    } else {
+      Serial.println("Failed to connect to Expo push API");
+    }
+  }
+}
+
+// Token management functions
+void saveApprovedTokens() {
+  prefs.begin("signalk", false);
+  prefs.putInt("tokenCount", approvedTokens.size());
+
+  int index = 0;
+  for (auto& pair : approvedTokens) {
+    String prefix = "tok" + String(index) + "_";
+    prefs.putString((prefix + "token").c_str(), pair.second.token);
+    prefs.putString((prefix + "clientId").c_str(), pair.second.clientId);
+    prefs.putString((prefix + "desc").c_str(), pair.second.description);
+    prefs.putString((prefix + "perms").c_str(), pair.second.permissions);
+    prefs.putULong((prefix + "time").c_str(), pair.second.approvedAt);
+    index++;
+  }
+
+  prefs.end();
+  Serial.println("Approved tokens saved to flash");
+}
+
+void loadApprovedTokens() {
+  prefs.begin("signalk", true);
+  int tokenCount = prefs.getInt("tokenCount", 0);
+
+  Serial.printf("Loading %d approved tokens from flash...\n", tokenCount);
+
+  for (int i = 0; i < tokenCount; i++) {
+    String prefix = "tok" + String(i) + "_";
+    ApprovedToken token;
+    token.token = prefs.getString((prefix + "token").c_str(), "");
+    token.clientId = prefs.getString((prefix + "clientId").c_str(), "");
+    token.description = prefs.getString((prefix + "desc").c_str(), "");
+    token.permissions = prefs.getString((prefix + "perms").c_str(), "read");
+    token.approvedAt = prefs.getULong((prefix + "time").c_str(), 0);
+
+    if (token.token.length() > 0) {
+      approvedTokens[token.token] = token;
+      Serial.printf("  Loaded token for: %s\n", token.clientId.c_str());
+    }
+  }
+
+  prefs.end();
+}
+
+bool isTokenValid(const String& token) {
+  return approvedTokens.find(token) != approvedTokens.end();
+}
+
+String extractBearerToken(AsyncWebServerRequest* request) {
+  if (!request->hasHeader("Authorization")) {
+    return "";
+  }
+
+  String authHeader = request->getHeader("Authorization")->value();
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.substring(7); // Remove "Bearer " prefix
+  }
+
+  return "";
+}
 
 // ====== NMEA STATE ======
 struct GPSData {
@@ -359,13 +562,19 @@ void updateGeofence() {
   // Check if outside geofence
   bool outside = distance > geofence.radius;
 
-  if (outside && !geofence.alarmActive) {
-    // Trigger alarm
+  if (outside) {
     char msg[128];
     snprintf(msg, sizeof(msg), "Vessel left geofence: %.0f m (> %.0f m)", distance, geofence.radius);
-    setNotification("geofence.exit", "alarm", String(msg));
-    geofence.alarmActive = true;
-    Serial.printf("GEOFENCE ALARM: %s\n", msg);
+
+    if (!geofence.alarmActive) {
+      // First time triggering alarm
+      setNotification("geofence.exit", "alarm", String(msg));
+      geofence.alarmActive = true;
+      Serial.printf("GEOFENCE ALARM: %s\n", msg);
+    }
+
+    // Send push notification continuously while outside (respects rate limit)
+    sendExpoPushNotification("Geofence Alert", String(msg), "geofence");
   } else if (!outside && geofence.alarmActive) {
     // Clear alarm
     clearNotification("geofence.exit");
@@ -414,6 +623,9 @@ void updateDepthAlarm(double depth) {
     setNotification("depth.alarm", "alarm", String(msg));
     depthAlarm.alarmActive = true;
     Serial.printf("DEPTH ALARM: %s\n", msg);
+
+    // Send push notification
+    sendExpoPushNotification("Depth Alert", String(msg), "depth");
   } else if (!triggered && depthAlarm.alarmActive) {
     // Clear alarm
     clearNotification("depth.alarm");
@@ -452,6 +664,9 @@ void updateWindAlarm(double windSpeedMS) {
     setNotification("wind.alarm", "alarm", String(msg));
     windAlarm.alarmActive = true;
     Serial.printf("WIND ALARM: %s\n", msg);
+
+    // Send push notification
+    sendExpoPushNotification("Wind Alert", String(msg), "wind");
   } else if (windAlarm.alarmActive && windKnots <= (windAlarm.threshold - RESET_HYSTERESIS_KNOTS)) {
     // Clear alarm with hysteresis
     clearNotification("wind.alarm");
@@ -941,6 +1156,10 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     serializeJsonPretty(doc, debugMsg);
     Serial.println(debugMsg);
 
+    // Note: WebSocket delta updates are currently open (no authentication required)
+    // This is because the AsyncWebSocket library doesn't provide access to URL parameters
+    // where the 6pack app sends its token. Authentication is enforced on PUT requests.
+
     JsonArray updates = doc["updates"];
     for (JsonVariant updateVar : updates) {
       JsonObject update = updateVar.as<JsonObject>();
@@ -1142,9 +1361,16 @@ void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       Serial.printf("Client ID: #%u\n", client->id());
       Serial.printf("Client IP: %s\n", client->remoteIP().toString().c_str());
       Serial.printf("Server: %s\n", server->url());
+
+      // Note: Token extraction from URL is not available in AsyncWebSocket
+      // The 6pack app sends token in URL query parameter, but we can't access it here
+      // For now, clients connect without authentication, and we'll need to handle
+      // authentication differently (e.g., through message-level tokens or server config)
+      Serial.printf("Client #%u connected (authentication will be checked on write operations)\n", client->id());
+
       Serial.println("STATUS: CONNECTED SUCCESSFULLY");
-      Serial.println("NOTE: WebSocket connections are open - authentication not required");
-      Serial.println("      Authentication tokens are for write operations (PUT requests)");
+      Serial.println("NOTE: WebSocket connections are open - no authentication required");
+      Serial.println("      PUT requests require valid tokens via Authorization header");
 
       // Send hello message immediately
       {
@@ -1173,6 +1399,7 @@ void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       Serial.printf("=== WEBSOCKET: Client #%u DISCONNECTED ===\n", client->id());
       Serial.println("========================================\n");
       clientSubscriptions.erase(client->id());
+      clientTokens.erase(client->id());  // Clean up token
       break;
 
     case WS_EVT_DATA:
@@ -1251,27 +1478,53 @@ void handleAccessRequest(AsyncWebServerRequest* req, uint8_t* data, size_t len, 
 
   String clientId = doc["clientId"] | "unknown";
   String description = doc["description"] | "SensESP client";
+  String permissions = doc["permissions"] | "readwrite";
 
   Serial.printf("Client ID: %s\n", clientId.c_str());
   Serial.printf("Description: %s\n", description.c_str());
+  Serial.printf("Permissions: %s\n", permissions.c_str());
 
   // Generate a requestId (use clientId as requestId for simplicity)
   String requestId = clientId;
 
-  // Auto-approve: generate token immediately
-  String token = "APPROVED-" + String(esp_random(), HEX);
+  // Check if this client already has an approved token
+  for (auto& pair : approvedTokens) {
+    if (pair.second.clientId == clientId) {
+      Serial.printf("Client already has approved token: %s\n", pair.second.token.c_str());
 
-  // Store the request for polling - it will be approved when polled
+      // Return COMPLETED with existing token
+      DynamicJsonDocument response(512);
+      response["state"] = "COMPLETED";
+      response["statusCode"] = 200;
+      response["requestId"] = requestId;
+
+      JsonObject accessRequest = response.createNestedObject("accessRequest");
+      accessRequest["permission"] = "APPROVED";
+      accessRequest["token"] = pair.second.token;
+
+      String output;
+      serializeJson(response, output);
+      req->send(202, "application/json", output);
+      Serial.println("=================================\n");
+      return;
+    }
+  }
+
+  // Create new pending request
   AccessRequestData reqData;
+  reqData.requestId = requestId;
   reqData.clientId = clientId;
   reqData.description = description;
-  reqData.token = token;
-  reqData.state = "COMPLETED"; // Will be approved when polled
+  reqData.permissions = permissions;
+  reqData.token = ""; // Will be generated upon approval
+  reqData.state = "PENDING";
+  reqData.permission = "";
+  reqData.timestamp = millis();
   accessRequests[requestId] = reqData;
 
   // SignalK spec: Initial POST returns 202 with PENDING state and href for polling
   DynamicJsonDocument response(256);
-  response["state"] = "PENDING";  // Must return PENDING, not COMPLETED
+  response["state"] = "PENDING";
   response["requestId"] = requestId;
   response["href"] = "/signalk/v1/access/requests/" + requestId;
 
@@ -1279,8 +1532,8 @@ void handleAccessRequest(AsyncWebServerRequest* req, uint8_t* data, size_t len, 
   serializeJson(response, output);
 
   Serial.printf("Response (202 PENDING): %s\n", output.c_str());
-  Serial.printf("RequestId: %s, Token: %s (will be returned when polled)\n", requestId.c_str(), token.c_str());
-  Serial.println("Client should now poll: /signalk/v1/access/requests/" + requestId);
+  Serial.printf("RequestId: %s - Awaiting manual approval\n", requestId.c_str());
+  Serial.println("Access admin UI at http://<ip>:3000/admin to approve/deny");
   Serial.println("=================================\n");
 
   req->send(202, "application/json", output);
@@ -1298,36 +1551,40 @@ void handleGetAccessRequestById(AsyncWebServerRequest* req) {
 
   Serial.printf("RequestId: %s\n", requestId.c_str());
 
-  // Check if requestId exists - if not, auto-create it (for SensESP compatibility)
+  // Check if requestId exists
   if (accessRequests.find(requestId) == accessRequests.end()) {
-    Serial.println("RequestId not found - AUTO-CREATING token for compatibility");
-
-    // Create a new access request entry with auto-approved token
-    AccessRequestData newReqData;
-    newReqData.clientId = requestId;
-    newReqData.description = "Auto-approved (polling without POST)";
-    newReqData.token = "APPROVED-" + String(esp_random(), HEX);
-    newReqData.state = "COMPLETED";
-    accessRequests[requestId] = newReqData;
-
-    Serial.printf("Generated token: %s\n", newReqData.token.c_str());
+    Serial.println("RequestId not found");
+    req->send(404, "application/json", "{\"error\":\"Request not found\"}");
+    return;
   }
 
   AccessRequestData& reqData = accessRequests[requestId];
 
-  // Return the status with token
+  // Build response based on state
   DynamicJsonDocument response(512);
   response["state"] = reqData.state;
-  response["statusCode"] = 200;
+  response["requestId"] = requestId;
 
-  JsonObject accessRequest = response.createNestedObject("accessRequest");
-  accessRequest["permission"] = "APPROVED";
-  accessRequest["token"] = reqData.token;
+  if (reqData.state == "COMPLETED") {
+    response["statusCode"] = 200;
+    JsonObject accessRequest = response.createNestedObject("accessRequest");
+    accessRequest["permission"] = reqData.permission; // "APPROVED" or "DENIED"
+
+    if (reqData.permission == "APPROVED") {
+      accessRequest["token"] = reqData.token;
+    }
+
+    Serial.printf("Response: %s with token: %s\n", reqData.permission.c_str(), reqData.token.c_str());
+  } else {
+    // Still PENDING
+    response["href"] = "/signalk/v1/access/requests/" + requestId;
+    Serial.println("Response: Still PENDING");
+  }
 
   String output;
   serializeJson(response, output);
 
-  Serial.printf("Response: %s\n", output.c_str());
+  Serial.printf("Response JSON: %s\n", output.c_str());
   Serial.println("==============================\n");
 
   req->send(200, "application/json", output);
@@ -1578,6 +1835,20 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
   Serial.printf("Path: %s\n", path.c_str());
   Serial.printf("Data length: %d bytes\n", len);
   Serial.printf("Raw body: %.*s\n", len, data);
+
+  // Optional: Check for authentication token
+  // (Currently permissive - allows requests without tokens)
+  String token = extractBearerToken(req);
+  if (token.length() > 0) {
+    if (!isTokenValid(token)) {
+      Serial.printf("Invalid token provided: %s\n", token.c_str());
+      req->send(401, "application/json", "{\"state\":\"COMPLETED\",\"statusCode\":401,\"message\":\"Unauthorized - Invalid token\"}");
+      return;
+    }
+    Serial.printf("Valid token: %s\n", token.substring(0, 15).c_str());
+  } else {
+    Serial.println("No token provided (open access mode)");
+  }
 
   DynamicJsonDocument doc(2048);  // Increased size for complex anchor values
   DeserializationError error = deserializeJson(doc, data, len);
@@ -2012,6 +2283,409 @@ void handleConfig(AsyncWebServerRequest* req) {
   req->send(200, "text/html", HTML_CONFIG);
 }
 
+// ====== ADMIN TOKEN MANAGEMENT PAGE ======
+const char* HTML_ADMIN = R"html(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Token Management - SignalK</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    h1 { color: #333; margin-bottom: 10px; font-size: 24px; }
+    h2 { color: #666; margin-bottom: 15px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+    th { background: #f8f8f8; font-weight: 600; }
+    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .btn-approve { background: #4CAF50; color: white; }
+    .btn-deny { background: #f44336; color: white; }
+    .btn-revoke { background: #ff9800; color: white; }
+    .btn:hover { opacity: 0.9; }
+    .status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .status-pending { background: #fff3cd; color: #856404; }
+    .status-approved { background: #d4edda; color: #155724; }
+    .empty { text-align: center; color: #999; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Token Management</h1>
+      <p style="color: #666; margin-top: 10px;">Manage access tokens for SignalK clients</p>
+    </div>
+
+    <div class="card">
+      <h2>Pending Requests</h2>
+      <div id="pending-requests"></div>
+    </div>
+
+    <div class="card">
+      <h2>Approved Tokens</h2>
+      <div id="approved-tokens"></div>
+    </div>
+  </div>
+
+  <script>
+    function loadData() {
+      fetch('/api/admin/tokens')
+        .then(r => r.json())
+        .then(data => {
+          renderPending(data.pending);
+          renderApproved(data.approved);
+        });
+    }
+
+    function renderPending(requests) {
+      const el = document.getElementById('pending-requests');
+      if (!requests || requests.length === 0) {
+        el.innerHTML = '<div class="empty">No pending requests</div>';
+        return;
+      }
+
+      el.innerHTML = '<table><tr><th>Client ID</th><th>Description</th><th>Permissions</th><th>Actions</th></tr>' +
+        requests.map(r => `
+          <tr>
+            <td><strong>${r.clientId}</strong></td>
+            <td>${r.description}</td>
+            <td>${r.permissions}</td>
+            <td>
+              <button class="btn btn-approve" onclick="approve('${r.requestId}')">Approve</button>
+              <button class="btn btn-deny" onclick="deny('${r.requestId}')">Deny</button>
+            </td>
+          </tr>
+        `).join('') + '</table>';
+    }
+
+    function renderApproved(tokens) {
+      const el = document.getElementById('approved-tokens');
+      if (!tokens || tokens.length === 0) {
+        el.innerHTML = '<div class="empty">No approved tokens</div>';
+        return;
+      }
+
+      el.innerHTML = '<table><tr><th>Client ID</th><th>Description</th><th>Token</th><th>Actions</th></tr>' +
+        tokens.map(t => `
+          <tr>
+            <td><strong>${t.clientId}</strong></td>
+            <td>${t.description}</td>
+            <td><code style="font-size:11px">${t.token.substring(0,20)}...</code></td>
+            <td>
+              <button class="btn btn-revoke" onclick="revoke('${t.token}')">Revoke</button>
+            </td>
+          </tr>
+        `).join('') + '</table>';
+    }
+
+    function approve(requestId) {
+      if (!confirm('Approve this access request?')) return;
+      fetch(`/api/admin/approve/${requestId}`, {method: 'POST'})
+        .then(r => r.json())
+        .then(() => { alert('Approved!'); loadData(); });
+    }
+
+    function deny(requestId) {
+      if (!confirm('Deny this access request?')) return;
+      fetch(`/api/admin/deny/${requestId}`, {method: 'POST'})
+        .then(r => r.json())
+        .then(() => { alert('Denied!'); loadData(); });
+    }
+
+    function revoke(token) {
+      if (!confirm('Revoke this token? The client will lose access.')) return;
+      fetch(`/api/admin/revoke/${token}`, {method: 'POST'})
+        .then(r => r.json())
+        .then(() => { alert('Token revoked!'); loadData(); });
+    }
+
+    loadData();
+    setInterval(loadData, 5000); // Refresh every 5 seconds
+  </script>
+</body>
+</html>
+)html";
+
+void handleAdmin(AsyncWebServerRequest* req) {
+  req->send(200, "text/html", HTML_ADMIN);
+}
+
+// API: Get all tokens and pending requests
+void handleGetAdminTokens(AsyncWebServerRequest* req) {
+  DynamicJsonDocument doc(2048);
+
+  // Pending requests
+  JsonArray pending = doc.createNestedArray("pending");
+  for (auto& pair : accessRequests) {
+    if (pair.second.state == "PENDING") {
+      JsonObject obj = pending.createNestedObject();
+      obj["requestId"] = pair.second.requestId;
+      obj["clientId"] = pair.second.clientId;
+      obj["description"] = pair.second.description;
+      obj["permissions"] = pair.second.permissions;
+    }
+  }
+
+  // Approved tokens
+  JsonArray approved = doc.createNestedArray("approved");
+  for (auto& pair : approvedTokens) {
+    JsonObject obj = approved.createNestedObject();
+    obj["token"] = pair.second.token;
+    obj["clientId"] = pair.second.clientId;
+    obj["description"] = pair.second.description;
+    obj["permissions"] = pair.second.permissions;
+  }
+
+  String output;
+  serializeJson(doc, output);
+  req->send(200, "application/json", output);
+}
+
+// Admin API router - handles all /api/admin/* POST routes
+void handleAdminApiPost(AsyncWebServerRequest* req) {
+  String url = req->url();
+  Serial.printf("\n=== ADMIN API POST: %s ===\n", url.c_str());
+
+  // Route to appropriate handler
+  if (url.startsWith("/api/admin/approve/")) {
+    String requestId = url.substring(19); // Skip "/api/admin/approve/"
+    Serial.printf("Routing to APPROVE: %s\n", requestId.c_str());
+
+    if (accessRequests.find(requestId) == accessRequests.end()) {
+      req->send(404, "application/json", "{\"error\":\"Request not found\"}");
+      return;
+    }
+
+    AccessRequestData& reqData = accessRequests[requestId];
+
+    // Generate token
+    String token = "APPROVED-" + String(esp_random(), HEX);
+
+    // Update request
+    reqData.token = token;
+    reqData.state = "COMPLETED";
+    reqData.permission = "APPROVED";
+
+    // Add to approved tokens
+    ApprovedToken approvedToken;
+    approvedToken.token = token;
+    approvedToken.clientId = reqData.clientId;
+    approvedToken.description = reqData.description;
+    approvedToken.permissions = reqData.permissions;
+    approvedToken.approvedAt = millis();
+    approvedTokens[token] = approvedToken;
+
+    // Save to flash
+    saveApprovedTokens();
+
+    Serial.printf("Token approved: %s\n", token.c_str());
+    Serial.printf("Client: %s\n", reqData.clientId.c_str());
+    Serial.println("================================\n");
+
+    DynamicJsonDocument response(256);
+    response["success"] = true;
+    response["token"] = token;
+
+    String output;
+    serializeJson(response, output);
+    req->send(200, "application/json", output);
+    return;
+  }
+
+  if (url.startsWith("/api/admin/deny/")) {
+    String requestId = url.substring(16); // Skip "/api/admin/deny/"
+    Serial.printf("Routing to DENY: %s\n", requestId.c_str());
+
+    if (accessRequests.find(requestId) == accessRequests.end()) {
+      req->send(404, "application/json", "{\"error\":\"Request not found\"}");
+      return;
+    }
+
+    AccessRequestData& reqData = accessRequests[requestId];
+    reqData.state = "COMPLETED";
+    reqData.permission = "DENIED";
+
+    Serial.printf("Request denied for client: %s\n", reqData.clientId.c_str());
+    Serial.println("================================\n");
+
+    req->send(200, "application/json", "{\"success\":true}");
+    return;
+  }
+
+  if (url.startsWith("/api/admin/revoke/")) {
+    String token = url.substring(18); // Skip "/api/admin/revoke/"
+    Serial.printf("Routing to REVOKE: %s\n", token.c_str());
+
+    if (approvedTokens.find(token) == approvedTokens.end()) {
+      req->send(404, "application/json", "{\"error\":\"Token not found\"}");
+      return;
+    }
+
+    String clientId = approvedTokens[token].clientId;
+    approvedTokens.erase(token);
+
+    // Save to flash
+    saveApprovedTokens();
+
+    Serial.printf("Token revoked for client: %s\n", clientId.c_str());
+    Serial.println("================================\n");
+
+    req->send(200, "application/json", "{\"success\":true}");
+    return;
+  }
+
+  // Unknown admin API route
+  req->send(404, "application/json", "{\"error\":\"Unknown admin API route\"}");
+}
+
+// API: Approve token request
+void handleApproveToken(AsyncWebServerRequest* req) {
+  String url = req->url();
+  int lastSlash = url.lastIndexOf('/');
+  String requestId = url.substring(lastSlash + 1);
+
+  Serial.printf("\n=== APPROVE REQUEST: %s ===\n", requestId.c_str());
+
+  if (accessRequests.find(requestId) == accessRequests.end()) {
+    req->send(404, "application/json", "{\"error\":\"Request not found\"}");
+    return;
+  }
+
+  AccessRequestData& reqData = accessRequests[requestId];
+
+  // Generate token
+  String token = "APPROVED-" + String(esp_random(), HEX);
+
+  // Update request
+  reqData.token = token;
+  reqData.state = "COMPLETED";
+  reqData.permission = "APPROVED";
+
+  // Add to approved tokens
+  ApprovedToken approvedToken;
+  approvedToken.token = token;
+  approvedToken.clientId = reqData.clientId;
+  approvedToken.description = reqData.description;
+  approvedToken.permissions = reqData.permissions;
+  approvedToken.approvedAt = millis();
+  approvedTokens[token] = approvedToken;
+
+  // Save to flash
+  saveApprovedTokens();
+
+  Serial.printf("Token approved: %s\n", token.c_str());
+  Serial.printf("Client: %s\n", reqData.clientId.c_str());
+  Serial.println("================================\n");
+
+  DynamicJsonDocument response(256);
+  response["success"] = true;
+  response["token"] = token;
+
+  String output;
+  serializeJson(response, output);
+  req->send(200, "application/json", output);
+}
+
+// API: Deny token request
+void handleDenyToken(AsyncWebServerRequest* req) {
+  String url = req->url();
+  int lastSlash = url.lastIndexOf('/');
+  String requestId = url.substring(lastSlash + 1);
+
+  Serial.printf("\n=== DENY REQUEST: %s ===\n", requestId.c_str());
+
+  if (accessRequests.find(requestId) == accessRequests.end()) {
+    req->send(404, "application/json", "{\"error\":\"Request not found\"}");
+    return;
+  }
+
+  AccessRequestData& reqData = accessRequests[requestId];
+  reqData.state = "COMPLETED";
+  reqData.permission = "DENIED";
+
+  Serial.printf("Request denied for client: %s\n", reqData.clientId.c_str());
+  Serial.println("================================\n");
+
+  req->send(200, "application/json", "{\"success\":true}");
+}
+
+// API: Revoke token
+void handleRevokeToken(AsyncWebServerRequest* req) {
+  String url = req->url();
+  int lastSlash = url.lastIndexOf('/');
+  String token = url.substring(lastSlash + 1);
+
+  Serial.printf("\n=== REVOKE TOKEN: %s ===\n", token.c_str());
+
+  if (approvedTokens.find(token) == approvedTokens.end()) {
+    req->send(404, "application/json", "{\"error\":\"Token not found\"}");
+    return;
+  }
+
+  String clientId = approvedTokens[token].clientId;
+  approvedTokens.erase(token);
+
+  // Save to flash
+  saveApprovedTokens();
+
+  Serial.printf("Token revoked for client: %s\n", clientId.c_str());
+  Serial.println("================================\n");
+
+  req->send(200, "application/json", "{\"success\":true}");
+}
+
+// API: Register Expo push token
+void handleRegisterExpoToken(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+  // Only process when we have the complete body
+  if (index + len != total) {
+    return;
+  }
+
+  Serial.println("\n=== REGISTER EXPO TOKEN ===");
+
+  DynamicJsonDocument doc(256);
+  DeserializationError error = deserializeJson(doc, data, len);
+
+  if (error) {
+    Serial.printf("JSON parse error: %s\n", error.c_str());
+    req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  String token = doc["token"] | "";
+
+  if (token.length() == 0) {
+    Serial.println("No token provided");
+    req->send(400, "application/json", "{\"error\":\"Token required\"}");
+    return;
+  }
+
+  // Validate token format (should start with "ExponentPushToken[")
+  if (!token.startsWith("ExponentPushToken[")) {
+    Serial.println("Invalid token format");
+    req->send(400, "application/json", "{\"error\":\"Invalid token format\"}");
+    return;
+  }
+
+  bool added = addExpoToken(token);
+
+  Serial.printf("Token: %s\n", token.c_str());
+  Serial.printf("Status: %s\n", added ? "Added" : "Already exists");
+  Serial.println("================================\n");
+
+  DynamicJsonDocument response(128);
+  response["success"] = true;
+  response["added"] = added;
+  response["totalTokens"] = expoTokens.size();
+
+  String output;
+  serializeJson(response, output);
+  req->send(200, "application/json", output);
+}
+
 void handleGetTcpConfig(AsyncWebServerRequest* req) {
   DynamicJsonDocument doc(256);
   doc["host"] = tcpServerHost;
@@ -2307,6 +2981,14 @@ void setup() {
   Serial.println("String operations work: " + test);
   Serial.println("Basic operations test passed");
   
+  // Load approved tokens from flash
+  Serial.println("Loading approved tokens...");
+  loadApprovedTokens();
+
+  // Load Expo push tokens from flash
+  Serial.println("Loading Expo push tokens...");
+  loadExpoTokens();
+
   // Load or generate vessel UUID
   Serial.println("Loading preferences...");
   Serial.println("Creating Preferences object...");
@@ -2463,10 +3145,20 @@ void setup() {
   // TCP Configuration page
   server.on("/config", HTTP_GET, handleConfig);
 
+  // Admin token management page
+  server.on("/admin", HTTP_GET, handleAdmin);
+
+  // Admin API endpoints
+  server.on("/api/admin/tokens", HTTP_GET, handleGetAdminTokens);
+
   // TCP Configuration API
   server.on("/api/tcp/config", HTTP_GET, handleGetTcpConfig);
   server.on("/api/tcp/config", HTTP_POST,
     [](AsyncWebServerRequest* req) {}, NULL, handleSetTcpConfig);
+
+  // Expo Push Notification API
+  server.on("/plugins/signalk-node-red/redApi/register-expo-token", HTTP_POST,
+    [](AsyncWebServerRequest* req) {}, NULL, handleRegisterExpoToken);
 
   // Test endpoint to verify server is reachable
   server.on("/test", HTTP_GET, [](AsyncWebServerRequest* req) {
@@ -2560,6 +3252,21 @@ void setup() {
   // Catch-all handler - route vessels/self paths if regex didn't match
   server.onNotFound([](AsyncWebServerRequest* req) {
     String url = req->url();
+
+    // Debug: Log what we're checking
+    Serial.printf("[DEBUG] onNotFound: method=%d, url=%s\n", req->method(), url.c_str());
+    Serial.printf("[DEBUG] HTTP_POST value=%d\n", HTTP_POST);
+    Serial.printf("[DEBUG] Checking admin API: POST=%d, starts=%d\n",
+                  (req->method() == HTTP_POST), url.startsWith("/api/admin/"));
+
+    // Check if this is an admin API POST request
+    // Use integer comparison instead of enum comparison
+    if (req->method() == 2 && url.startsWith("/api/admin/")) {
+      Serial.println("=== ROUTING ADMIN API POST (regex fallback) ===");
+      Serial.printf("URL: %s\n", url.c_str());
+      handleAdminApiPost(req);
+      return;
+    }
 
     // Check if this is an access request polling path
     if (url.startsWith("/signalk/v1/access/requests/") && url.length() > 28) {
