@@ -3422,13 +3422,41 @@ void setup() {
 String nmeaBuffer;
 uint32_t lastWsCleanup = 0;
 uint32_t lastStatusLog = 0;
+uint32_t lastWifiCheck = 0;
+bool wasWifiConnected = false;
 
 void loop() {
   // Process WiFiManager (non-blocking)
   wm.process();
 
-  // Log WiFi status periodically for debugging
+  // Check WiFi connection and reconnect if needed
   uint32_t now = millis();
+  if (now - lastWifiCheck > 5000) { // Check every 5 seconds
+    lastWifiCheck = now;
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+
+    if (!isConnected && wasWifiConnected) {
+      // Connection was lost
+      Serial.println("\n!!! WiFi connection lost !!!");
+      Serial.println("Attempting to reconnect...");
+      wasWifiConnected = false;
+    }
+
+    if (!isConnected) {
+      // Try to reconnect using saved credentials
+      WiFi.reconnect();
+    } else if (!wasWifiConnected) {
+      // Just reconnected
+      Serial.println("\n*** WiFi reconnected successfully ***");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+      wasWifiConnected = true;
+    } else {
+      wasWifiConnected = true;
+    }
+  }
+
+  // Log WiFi status periodically for debugging
   if (now - lastStatusLog > 60000) { // Every 60 seconds
     lastStatusLog = now;
     Serial.println("\n=== Status Update ===");
