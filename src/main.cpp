@@ -1143,6 +1143,8 @@ void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       Serial.printf("Client IP: %s\n", client->remoteIP().toString().c_str());
       Serial.printf("Server: %s\n", server->url());
       Serial.println("STATUS: CONNECTED SUCCESSFULLY");
+      Serial.println("NOTE: WebSocket connections are open - authentication not required");
+      Serial.println("      Authentication tokens are for write operations (PUT requests)");
 
       // Send hello message immediately
       {
@@ -1207,6 +1209,10 @@ void handleSignalKRoot(AsyncWebServerRequest* req) {
   JsonObject server = doc.createNestedObject("server");
   server["id"] = serverName;
   server["version"] = "1.0.0";
+
+  // Security configuration removed - no authentication required
+  // This allows SensESP to connect without Authorization headers,
+  // avoiding AsyncWebSocket library bug with bearer tokens
 
   String output;
   serializeJson(doc, output);
