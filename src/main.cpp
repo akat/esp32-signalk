@@ -1509,9 +1509,10 @@ void handleSignalKRoot(AsyncWebServerRequest* req) {
   server["id"] = serverName;
   server["version"] = "1.0.0";
 
-  // Security configuration removed - no authentication required
-  // This allows SensESP to connect without Authorization headers,
-  // avoiding AsyncWebSocket library bug with bearer tokens
+  // REMOVED: Security configuration to fix SensESP connection bug
+  // SensESP gets stuck trying to validate stored tokens when security is advertised
+  // By not advertising security, SensESP should connect directly without authentication
+  // WebSocket connections are still open (no auth required) so this is safe for SensESP
 
   String output;
   serializeJson(doc, output);
@@ -1625,8 +1626,42 @@ void handleGetAccessRequestById(AsyncWebServerRequest* req) {
 
   // Check if requestId exists
   if (accessRequests.find(requestId) == accessRequests.end()) {
-    Serial.println("RequestId not found");
-    req->send(404, "application/json", "{\"error\":\"Request not found\"}");
+    Serial.println("RequestId not found - Auto-generating approval for SensESP compatibility");
+
+    // Auto-generate and approve token for this requestId
+    // This fixes the issue when ESP32 reboots and SensESP has an old requestId
+    String newToken = generateUUID();  // Generate a new token
+
+    // Store approved token
+    ApprovedToken approvedToken;
+    approvedToken.token = newToken;
+    approvedToken.clientId = requestId;  // Use requestId as clientId
+    approvedToken.description = "SensESP (auto-approved after reboot)";
+    approvedToken.permissions = "readwrite";
+    approvedToken.approvedAt = millis();
+    approvedTokens[newToken] = approvedToken;
+
+    // Save to flash
+    saveApprovedTokens();
+
+    // Return COMPLETED with new token
+    DynamicJsonDocument response(512);
+    response["state"] = "COMPLETED";
+    response["statusCode"] = 200;
+    response["requestId"] = requestId;
+
+    JsonObject accessRequest = response.createNestedObject("accessRequest");
+    accessRequest["permission"] = "APPROVED";
+    accessRequest["token"] = newToken;
+
+    String output;
+    serializeJson(response, output);
+
+    Serial.printf("Auto-approved! Generated token: %s\n", newToken.c_str());
+    Serial.printf("Response JSON: %s\n", output.c_str());
+    Serial.println("==============================\n");
+
+    req->send(200, "application/json", output);
     return;
   }
 
@@ -1683,13 +1718,18 @@ void handleGetAccessRequests(AsyncWebServerRequest* req) {
 
 // GET /signalk/v1/auth/validate - Validate token (always valid)
 void handleAuthValidate(AsyncWebServerRequest* req) {
+  Serial.println("\n=== AUTH VALIDATION REQUEST ===");
+  Serial.printf("Client IP: %s\n", req->client()->remoteIP().toString().c_str());
+
   // Check if Authorization header is present
   if (req->hasHeader("Authorization")) {
     String auth = req->header("Authorization");
-    Serial.printf("Token validation request: %s\n", auth.c_str());
+    Serial.printf("Authorization header: %s\n", auth.c_str());
+  } else {
+    Serial.println("No Authorization header present");
   }
 
-  // Always return valid
+  // Always return valid - we accept all tokens
   DynamicJsonDocument doc(256);
   doc["valid"] = true;
   doc["state"] = "COMPLETED";
@@ -1697,6 +1737,9 @@ void handleAuthValidate(AsyncWebServerRequest* req) {
 
   String output;
   serializeJson(doc, output);
+  Serial.printf("Response: %s\n", output.c_str());
+  Serial.println("===============================\n");
+
   req->send(200, "application/json", output);
 }
 
@@ -3425,6 +3468,50 @@ void setup() {
 
   // Initialize I2C Sensors
   initI2CSensors();
+
+  // HTTP GET handler for /signalk/v1/stream - Token validation for SensESP
+  // IMPORTANT: This MUST be registered BEFORE the WebSocket handler!
+  // SensESP v3.1.1 validates tokens by making GET request to /signalk/v1/stream
+  // and expects HTTP 426 "Upgrade Required" to indicate valid token
+  server.on("/signalk/v1/stream", HTTP_GET, [](AsyncWebServerRequest* req) {
+    Serial.println("\n=== GET /signalk/v1/stream (Token Validation) ===");
+    Serial.printf("Client IP: %s\n", req->client()->remoteIP().toString().c_str());
+
+    // Check for Authorization header
+    if (req->hasHeader("Authorization")) {
+      String auth = req->header("Authorization");
+      Serial.printf("Authorization: %s\n", auth.c_str());
+
+      // Extract token from "Bearer <token>" format
+      if (auth.startsWith("Bearer ")) {
+        String token = auth.substring(7);
+        token.trim();
+        Serial.printf("Token: %s\n", token.c_str());
+
+        // Check if token is in approved list
+        if (approvedTokens.find(token) != approvedTokens.end()) {
+          Serial.println("Token found in approved list - returning 426");
+          // Return 426 Upgrade Required - this tells SensESP the token is valid
+          // and it should upgrade to WebSocket connection
+          req->send(426, "text/plain", "Upgrade Required");
+          Serial.println("Response: 426 Upgrade Required");
+          Serial.println("======================================\n");
+          return;
+        } else {
+          Serial.println("Token NOT found in approved list - returning 401");
+          req->send(401, "text/plain", "Unauthorized");
+          Serial.println("Response: 401 Unauthorized");
+          Serial.println("======================================\n");
+          return;
+        }
+      }
+    }
+
+    Serial.println("No valid Authorization header - returning 401");
+    req->send(401, "text/plain", "Unauthorized");
+    Serial.println("Response: 401 Unauthorized");
+    Serial.println("======================================\n");
+  });
 
   // WebSocket setup
   Serial.println("Setting up WebSocket...");
