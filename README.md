@@ -1,394 +1,604 @@
-# ESP32 SignalK Server
+# ESP32 SignalK Gateway
 
-Πλήρης υλοποίηση SignalK server για ESP32 με WiFiManager, WebSocket deltas, REST API και NMEA0183 parsing.
+A complete marine data acquisition and distribution system based on ESP32, designed for the **LILYGO TTGO T-CAN485** board. This project creates a powerful SignalK server that bridges NMEA 0183, NMEA 2000, GPS, and I2C sensors to WiFi-enabled marine apps.
 
-## 🚀 Γρήγορη Εκκίνηση
+## Features
 
-### Απαιτήσεις Hardware
+### Core Functionality
+- **SignalK HTTP/WebSocket Server** (Port 3000)
+- **WiFi Access Point & Client Mode** with WiFiManager
+- **Token-Based Authentication** with admin approval UI
+- **Push Notifications** via Expo (iOS/Android)
+- **Real-time Alarms**: Geofence, Wind, Depth
+- **mDNS Discovery** (signalk.local)
+- **Web Dashboard** for monitoring and configuration
 
-- ESP32 DevKit (οποιοδήποτε variant)
-- GPS module με NMEA0183 output (4800 baud)
-- Καλώδια σύνδεσης
+### Data Sources
 
-### Καλωδίωση GPS
+#### 1. NMEA 2000 (CAN Bus)
+- **Supported PGNs**:
+  - 129025: Position (Lat/Lon)
+  - 129026: COG & SOG
+  - 130306: Wind Speed & Direction
+  - 128267: Water Depth
+  - 130310: Environmental Data (Temperature, Pressure)
+- **Mode**: Listen-only (won't interfere with existing network)
+- **Auto-alarm integration** for wind and depth
 
-```
-GPS Module    →    ESP32
----------          ------
-TX        →    GPIO 16 (RX)
-RX        →    GPIO 17 (TX)
-VCC       →    3.3V
-GND       →    GND
-```
+#### 2. GPS Module (NMEA 0183 via UART)
+- Supports GGA, RMC, VTG, HDT sentences
+- Automatic position, speed, and course updates
+- Configurable baud rate (default 9600)
 
-### Εγκατάσταση με PlatformIO
+#### 3. NMEA 0183 Instruments (UART)
+- Standard marine instruments connection
+- Supports: GPS, Wind, Depth, Speed, Heading, Temperature
+- 4800 baud (standard marine)
 
-1. **Clone το project:**
-```bash
-git clone <your-repo>
-cd esp32-signalk-server
-```
+#### 4. I2C Environmental Sensors
+- **BME280**: Temperature, Barometric Pressure, Humidity
+- Auto-detection at I2C addresses 0x76 and 0x77
+- Inside cabin environmental monitoring
 
-2. **Άνοιξε στο VS Code με PlatformIO**
+### Alarms & Notifications
 
-3. **Build & Upload:**
-```bash
-pio run --target upload
-```
+#### Geofence Alarm
+- Set anchor position and radius
+- Continuous notifications while outside boundary (3-second intervals)
+- Visual and push notification alerts
 
-4. **Monitor:**
-```bash
-pio device monitor
-```
+#### Wind Alarm
+- Configurable wind speed threshold (knots)
+- True wind speed monitoring
+- Push notifications on threshold breach
 
-### Εγκατάσταση με Arduino IDE
+#### Depth Alarm
+- Configurable minimum depth (meters)
+- Push notifications on shallow water
+- Auto-clear when depth returns to normal
 
-1. **Εγκατάστησε τις βιβλιοθήκες:**
-   - Sketch → Include Library → Manage Libraries
-   - Αναζήτησε και εγκατάστησε:
-     - `WiFiManager` by tzapu (v2.0.16-rc.2+)
-     - `ArduinoJson` by Benoit Blanchon (v6.x)
-     - `ESPAsyncWebServer` και `AsyncTCP` (manual install από GitHub)
+#### Push Notifications
+- Expo push notification service integration
+- Multi-device support
+- Custom sound: `geofence_alarm.wav`
+- 3-second rate limiting
+- Channel: `geofence-alarms`
 
-2. **Manual install για ESPAsyncWebServer:**
-   - Download: https://github.com/me-no-dev/ESPAsyncWebServer/archive/master.zip
-   - Download: https://github.com/me-no-dev/AsyncTCP/archive/master.zip
-   - Extract στο `Arduino/libraries/`
+## Hardware Requirements
 
-3. **Άνοιξε το signalk_server.ino**
+### Recommended Board
+**LILYGO TTGO T-CAN485 ESP32**
+- ESP32 MCU with 4MB Flash
+- Built-in CAN transceiver (SN65HVD231)
+- Built-in RS485 transceiver (MAX13487EESA+)
+- SD card slot
+- USB-C programming interface
+- 5-12V power input (perfect for marine 12V systems)
 
-4. **Επίλεξε Board:** Tools → Board → ESP32 Dev Module
+### Optional Modules
+- **GPS Module**: Any NMEA 0183 UART GPS (NEO-6M, NEO-M8N, etc.)
+- **BME280 Sensor**: I2C environmental sensor
+- **12V Power Supply**: For marine installations
 
-5. **Upload!**
+## Pin Configuration
 
-## 📡 Πρώτη Χρήση
-
-### 1. WiFi Setup
-
-Κατά την πρώτη εκκίνηση:
-
-1. Το ESP32 δημιουργεί Access Point: **`SignalK-Setup`**
-2. Password: **`signalk123`**
-3. Συνδέσου από το κινητό/laptop
-4. Ανοίγει αυτόματα το configuration portal
-5. Επίλεξε το WiFi δίκτυό σου και βάλε password
-6. (Optional) Άλλαξε το "Server Name"
-7. Πάτα Save
-
-### 2. Εύρεση IP Address
-
-Μετά τη σύνδεση, δες το Serial Monitor για το IP:
-```
-WiFi Connected!
-IP Address: 192.168.1.100
-SignalK API: http://192.168.1.100/signalk/v1/api/
-WebSocket: ws://192.168.1.100/signalk/v1/stream
-```
-
-### 3. Access Points
-
-- **Web UI:** http://192.168.1.100/
-- **SignalK API:** http://192.168.1.100/signalk/v1/api/
-- **WebSocket:** ws://192.168.1.100/signalk/v1/stream
-
-## 🔐 Authentication
-
-### Default Admin Token
-
-Κατά την πρώτη εκκίνηση δημιουργείται αυτόματα ένα admin token:
+### LILYGO T-CAN485 Pinout
 
 ```
-=== DEFAULT ADMIN TOKEN ===
-abc123def456ghi789...
-===========================
+┌─────────────────────────────────────────┐
+│      LILYGO TTGO T-CAN485 ESP32        │
+├─────────────────────────────────────────┤
+│                                         │
+│  CAN Bus (Built-in)                     │
+│  ├─ TX:  GPIO 5                         │
+│  └─ RX:  GPIO 35                        │
+│                                         │
+│  NMEA 0183 UART (Serial1)               │
+│  ├─ RX:  GPIO 16                        │
+│  └─ TX:  GPIO 17                        │
+│                                         │
+│  GPS Module (Serial2)                   │
+│  ├─ RX:  GPIO 25                        │
+│  └─ TX:  GPIO 26                        │
+│                                         │
+│  I2C Sensors                            │
+│  ├─ SDA: GPIO 18                        │
+│  └─ SCL: GPIO 19                        │
+│                                         │
+│  RS485 (Built-in)                       │
+│  ├─ RX:  GPIO 21                        │
+│  ├─ TX:  GPIO 22                        │
+│  └─ DE:  GPIO 17                        │
+│                                         │
+│  RGB LED:    GPIO 4                     │
+│  Power:      5-12V DC                   │
+│                                         │
+└─────────────────────────────────────────┘
 ```
 
-**ΣΗΜΑΝΤΙΚΟ:** Κράτησε αυτό το token! Το χρειάζεσαι για admin operations.
+## Connection Diagrams
 
-### Χρήση Tokens
+### GPS Module Connection
 
-#### Με Authorization Header:
-```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  http://192.168.1.100/signalk/v1/api/vessels/self
+```
+GPS Module (NEO-6M/NEO-M8N)
+┌─────────────┐
+│   GPS       │
+│             │
+│  VCC ●──────┼──── 3.3V
+│  GND ●──────┼──── GND
+│  TX  ●──────┼──── GPIO 25 (RX)
+│  RX  ●──────┼──── GPIO 26 (TX) [Optional]
+│             │
+└─────────────┘
 ```
 
-#### Με Cookie:
-```bash
-curl -b "JAUTHENTICATION=YOUR_TOKEN" \
-  http://192.168.1.100/signalk/v1/api/vessels/self
+### BME280 Sensor Connection
+
+```
+BME280 Sensor
+┌─────────────┐
+│   BME280    │
+│             │
+│  VCC ●──────┼──── 3.3V
+│  GND ●──────┼──── GND
+│  SDA ●──────┼──── GPIO 18
+│  SCL ●──────┼──── GPIO 19
+│             │
+└─────────────┘
 ```
 
-### Διαχείριση Tokens
+### NMEA 2000 Connection
 
-**Λίστα όλων των tokens (admin only):**
-```bash
-curl -H "Authorization: Bearer ADMIN_TOKEN" \
-  http://192.168.1.100/admin/tokens
+```
+NMEA 2000 Network
+┌─────────────────────────┐
+│  Marine Electronics     │
+│  (Chartplotter, MFD,    │
+│   Instruments, etc.)    │
+│                         │
+│    CANH ●───────●       │
+│    CANL ●───────●       │
+│                         │
+└─────────────┬───────────┘
+              │
+        120Ω Termination
+              │
+┌─────────────┴───────────┐
+│  T-CAN485 Board         │
+│  (Built-in CAN Bus)     │
+└─────────────────────────┘
 ```
 
-**Δημιουργία νέου token:**
-```bash
-curl -X POST \
-  -H "Authorization: Bearer ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"role":"readonly"}' \
-  http://192.168.1.100/admin/tokens
+### Complete System Diagram
+
+```
+                    ┌──────────────────────────┐
+                    │   12V Marine Power       │
+                    │   (or 5V USB)            │
+                    └────────────┬─────────────┘
+                                 │
+                    ┌────────────▼─────────────┐
+                    │                          │
+   ┌────────────────┤  LILYGO T-CAN485 ESP32  ├────────────────┐
+   │                │                          │                │
+   │                └──────────────────────────┘                │
+   │                                                            │
+   │ NMEA 2000 (CAN)                                   GPS (UART)
+   │                                                            │
+┌──▼───────────────┐                              ┌────────────▼─────┐
+│ Marine Network   │                              │  NEO-M8N GPS     │
+│ - Chartplotter   │                              │  Module          │
+│ - Wind Sensor    │                              └──────────────────┘
+│ - Depth Sounder  │
+│ - Engine Data    │                  ┌─────────────────────┐
+└──────────────────┘                  │  BME280 Sensor      │
+                                      │  (Temperature,      │
+┌──────────────────┐                  │   Pressure,         │
+│ NMEA 0183        │                  │   Humidity)         │
+│ Instruments      ├──────────────────┤                     │
+│ (4800 baud)      │     Serial1      └─────────────────────┘
+└──────────────────┘
+                                               │
+                                               │ WiFi
+                    ┌──────────────────────────▼──────────┐
+                    │                                     │
+              ┌─────▼──────┐                  ┌──────────▼─────┐
+              │  6pack App │                  │  Web Dashboard │
+              │  (iOS/      │                  │  Admin Panel   │
+              │   Android)  │                  │  Port 3000     │
+              └────────────┘                  └────────────────┘
 ```
 
-Roles:
-- `admin` - Full access (read/write)
-- `readonly` - Read-only access
+## Software Installation
 
-## 📊 SignalK API Usage
+### Prerequisites
+- [PlatformIO](https://platformio.org/) IDE or CLI
+- USB cable (USB-C for T-CAN485)
+- (Optional) 6pack mobile app for iOS/Android
+
+### Building & Uploading
+
+1. **Clone or download this project**
+
+2. **Open in PlatformIO**
+   ```bash
+   cd esp32-signalk
+   pio run
+   ```
+
+3. **Upload to ESP32**
+   ```bash
+   pio run --target upload
+   ```
+
+4. **Monitor serial output**
+   ```bash
+   pio device monitor
+   ```
+
+### First Boot Configuration
+
+1. **Connect to WiFi AP**
+   - SSID: `ESP32-SignalK`
+   - Password: `signalk123`
+
+2. **Configure WiFi**
+   - Open browser: `http://192.168.4.1`
+   - Select your WiFi network
+   - Enter password
+   - Click "Save"
+
+3. **Access SignalK Server**
+   - Find IP address in serial monitor or use `signalk.local`
+   - Open browser: `http://signalk.local:3000` or `http://[IP]:3000`
+
+## API Endpoints
 
 ### Discovery
-```bash
-curl http://192.168.1.100/signalk
+```
+GET /signalk
+Returns: Server information and WebSocket URL
 ```
 
-### Get All Vessel Data
-```bash
-curl http://192.168.1.100/signalk/v1/api/vessels/self
+### SignalK REST API
+```
+GET  /signalk/v1/api/vessels/self
+GET  /signalk/v1/api/vessels/self/navigation/position
+PUT  /signalk/v1/api/vessels/self/* (requires token)
 ```
 
-### Get Specific Path
-```bash
-curl http://192.168.1.100/signalk/v1/api/vessels/self/navigation/position
+### WebSocket Stream
+```
+WS /signalk/v1/stream
+Subscribe to real-time SignalK deltas
 ```
 
-### Update Value (requires admin token)
+### Authentication
+```
+POST /signalk/v1/access/requests
+Body: {"clientId": "...", "description": "..."}
+Returns: {"requestId": "...", "state": "PENDING"}
+
+GET /signalk/v1/access/requests/{requestId}
+Returns: {"state": "COMPLETED", "token": "..."}
+```
+
+### Admin Panel
+```
+GET  /admin
+Admin UI for token approval/denial
+
+POST /api/admin/approve/{requestId}
+POST /api/admin/deny/{requestId}
+POST /api/admin/revoke/{token}
+```
+
+### Geofence Control
+```
+POST /api/geofence/set-anchor
+Body: {Position from current GPS}
+
+POST /api/geofence/enable
+Body: {"enabled": true, "radius": 100}
+
+POST /api/geofence/disable
+```
+
+### Push Notifications
+```
+POST /plugins/signalk-node-red/redApi/register-expo-token
+Body: {"token": "ExponentPushToken[...]"}
+```
+
+## Configuration
+
+### WiFi Settings
+- **AP SSID**: `ESP32-SignalK` (change in main.cpp `AP_SSID`)
+- **AP Password**: `signalk123` (change in main.cpp `AP_PASSWORD`)
+- **Portal**: Always available at `http://192.168.4.1`
+
+### Serial Port Settings
+```cpp
+// NMEA 0183 UART (Serial1)
+#define NMEA_RX 16
+#define NMEA_TX 17
+#define NMEA_BAUD 4800
+
+// GPS Module (Serial2)
+#define GPS_RX 25
+#define GPS_TX 26
+#define GPS_BAUD 9600
+```
+
+### CAN Bus Settings
+```cpp
+// NMEA 2000 CAN Bus
+#define CAN_TX 5
+#define CAN_RX 35
+```
+
+### I2C Settings
+```cpp
+// I2C Sensors
+#define I2C_SDA 18
+#define I2C_SCL 19
+```
+
+### Alarm Thresholds
+```cpp
+// Default values (configurable via API)
+Geofence radius: 100 meters
+Wind threshold: 20 knots
+Depth threshold: 2 meters
+```
+
+## Mobile App Setup
+
+### 6pack App Configuration
+
+1. **Install 6pack app** (iOS/Android)
+
+2. **Add Server**
+   - Server: `http://signalk.local:3000` or `http://[IP]:3000`
+   - Leave token blank initially
+
+3. **Request Access Token**
+   - App will automatically request access
+   - Check serial monitor for request ID
+   - Open admin panel: `http://signalk.local:3000/admin`
+   - Approve the request
+   - App will receive token automatically
+
+4. **Register for Push Notifications**
+   - App automatically registers Expo push token
+   - Notifications enabled for all alarms
+
+## Alarm Configuration
+
+### Geofence Setup
+
+**Set Anchor Position:**
 ```bash
-curl -X PUT \
-  -H "Authorization: Bearer ADMIN_TOKEN" \
+curl -X POST http://signalk.local:3000/api/geofence/set-anchor
+```
+
+**Enable Geofence:**
+```bash
+curl -X POST http://signalk.local:3000/api/geofence/enable \
   -H "Content-Type: application/json" \
-  -d '{"value": 45.5}' \
-  http://192.168.1.100/signalk/v1/api/vessels/self/navigation/custom/myvalue
+  -d '{"enabled": true, "radius": 100}'
 ```
 
-## 🔌 WebSocket Usage
+### Wind Alarm Setup
 
-### JavaScript Client
-```javascript
-const ws = new WebSocket('ws://192.168.1.100/signalk/v1/stream');
-
-ws.onopen = () => {
-  // Subscribe to all navigation paths
-  ws.send(JSON.stringify({
-    context: 'vessels.self',
-    subscribe: [
-      {
-        path: 'navigation.*',
-        period: 1000,
-        format: 'delta',
-        policy: 'instant'
-      }
-    ]
-  }));
-};
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Delta:', data);
-};
-```
-
-### Python Client
-```python
-import websocket
-import json
-
-def on_message(ws, message):
-    data = json.loads(message)
-    print('Delta:', data)
-
-def on_open(ws):
-    subscribe = {
-        "context": "vessels.self",
-        "subscribe": [{
-            "path": "*",
-            "period": 1000
-        }]
-    }
-    ws.send(json.dumps(subscribe))
-
-ws = websocket.WebSocketApp(
-    "ws://192.168.1.100/signalk/v1/stream",
-    on_message=on_message,
-    on_open=on_open
-)
-ws.run_forever()
-```
-
-## 🛠️ Προχωρημένη Διαμόρφωση
-
-### Αλλαγή NMEA Pins
-
-Στο `signalk_server.ino`:
+Wind alarms are configured in the code:
 ```cpp
-#define NMEA_RX 16  // Άλλαξε αυτό
-#define NMEA_TX 17  // Άλλαξε αυτό
-#define NMEA_BAUD 4800  // ή 38400 για AIS
+windAlarm.threshold = 20.0;  // knots
+windAlarm.enabled = true;
 ```
 
-### Πολλαπλές NMEA Πηγές
+### Depth Alarm Setup
 
+Depth alarms are configured in the code:
 ```cpp
-// GPS στο Serial1
-Serial1.begin(4800, SERIAL_8N1, 16, 17);
-
-// AIS στο Serial2
-Serial2.begin(38400, SERIAL_8N1, 18, 19);
+depthAlarm.threshold = 2.0;  // meters
+depthAlarm.enabled = true;
 ```
 
-### mDNS (signalk.local)
-
-Πρόσθεσε στο `setup()`:
-```cpp
-#include <ESPmDNS.h>
-
-if (MDNS.begin("signalk")) {
-  MDNS.addService("signalk-http", "tcp", 80);
-  MDNS.addService("signalk-ws", "tcp", 80);
-  Serial.println("mDNS: http://signalk.local");
-}
-```
-
-### Custom Baud Rate
-```cpp
-#define NMEA_BAUD 38400  // Για πιο γρήγορα devices
-```
-
-## 🐛 Troubleshooting
-
-### WiFi δεν συνδέεται
-
-1. Κράτα πατημένο το boot button για 3 δευτερόλεπτα
-2. Reset WiFi settings (θα δημιουργηθεί ξανά το AP)
-
-### Δεν βλέπω GPS data
-
-1. Έλεγξε τα pins (RX/TX ανάποδα!)
-2. Έλεγξε το baud rate (4800 για GPS, 38400 για AIS)
-3. Δες το Serial Monitor: `pio device monitor`
-4. Πρέπει να βλέπεις NMEA sentences: `$GPRMC,123456,...`
-
-### WebSocket δεν συνδέεται
-
-1. Έλεγξε το firewall
-2. Δοκίμασε από browser console: `new WebSocket('ws://IP/signalk/v1/stream')`
-3. Δες αν το ESP32 έχει αρκετή μνήμη: `ESP.getFreeHeap()`
-
-### Token authentication fails
-
-1. Έλεγξε ότι χρησιμοποιείς το σωστό format: `Bearer TOKEN`
-2. Το token case-sensitive!
-3. Δες τα available tokens: `/admin/tokens` με admin token
-
-## 📱 Mobile App Integration
-
-Το SignalK API είναι συμβατό με:
-
-- **WilhelmSK** (iOS)
-- **SignalK Mobile** (Android)
-- **iNavX** (iOS/Android)
-- **OpenCPN** (με SignalK plugin)
-
-### Configuration στο Mobile App:
-
-1. Server URL: `http://192.168.1.100`
-2. WebSocket: `ws://192.168.1.100/signalk/v1/stream`
-3. Authentication: Bearer token ή cookie
-4. Subscribe to: `vessels.self.navigation.*`
-
-## 📈 Performance Tips
-
-### Για πολλά WebSocket clients:
-```cpp
-#define WS_MAX_QUEUED_MESSAGES 64
-```
-
-### Για μεγάλα JSON deltas:
-```cpp
-DynamicJsonDocument doc(8192);  // Αύξησε το size
-```
-
-### Rate limiting:
-```cpp
-const uint32_t DELTA_MIN_PERIOD_MS = 100;  // Μείωσε για πιο συχνά updates
-```
-
-## 🔄 OTA Updates
-
-### Enable OTA στο platformio.ini:
-```ini
-upload_protocol = espota
-upload_port = 192.168.1.100
-```
-
-### Upload over WiFi:
-```bash
-pio run --target upload --upload-port 192.168.1.100
-```
-
-## 📝 Supported NMEA Sentences
-
-- ✅ **RMC** - Position, speed, course
-- ✅ **GGA** - Position, altitude, satellites
-- ✅ **VTG** - Speed and course
-- ✅ **HDG** - Heading
-
-### Προσθήκη νέων sentences:
-
-```cpp
-// Στη parseNMEASentence():
-else if (msgType.endsWith("DBT") && fields.size() >= 4) {
-  double depth = fields[3].toDouble();  // meters
-  setPathValue("environment.depth.belowTransducer", depth, 
-               "nmea0183.depthsounder", "m", "Depth");
-}
-```
-
-## 🎯 SignalK Paths
+## SignalK Paths
 
 ### Navigation
-- `navigation.position.latitude` (deg)
-- `navigation.position.longitude` (deg)
-- `navigation.speedOverGround` (m/s)
-- `navigation.courseOverGroundTrue` (rad)
-- `navigation.headingMagnetic` (rad)
-- `navigation.gnss.altitude` (m)
-- `navigation.gnss.satellitesInView` (count)
-
-### Custom Paths
-Μπορείς να προσθέσεις δικά σου:
-```cpp
-setPathValue("electrical.batteries.house.voltage", 12.6, 
-             "manual", "V", "House battery voltage");
+```
+navigation.position               Vessel position (lat/lon)
+navigation.speedOverGround        Speed over ground (m/s)
+navigation.courseOverGroundTrue   Course over ground (radians)
+navigation.headingTrue            True heading (radians)
 ```
 
-## 📚 Resources
+### Environment
+```
+environment.wind.speedTrue        True wind speed (m/s)
+environment.wind.angleTrueWater   True wind angle (radians)
+environment.depth.belowTransducer Water depth (meters)
+environment.water.temperature     Water temperature (K)
+environment.outside.temperature   Outside air temperature (K)
+environment.outside.pressure      Atmospheric pressure (Pa)
+environment.inside.temperature    Inside cabin temperature (K)
+environment.inside.pressure       Inside cabin pressure (Pa)
+environment.inside.humidity       Inside relative humidity (0-1)
+```
 
-- [SignalK Specification](https://signalk.org/specification/)
-- [SignalK REST API](https://signalk.org/specification/1.7.0/doc/rest_api.html)
-- [NMEA0183 Reference](https://www.tronico.fi/OH6NT/docs/NMEA0183.pdf)
-- [ESP32 Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/)
+### Notifications
+```
+notifications.geofence.exit       Geofence alarm state
+notifications.wind.alarm          Wind alarm state
+notifications.depth.alarm         Depth alarm state
+```
 
-## 🤝 Contributing
+## Data Sources
 
-Contributions welcome! Ιδέες για βελτιώσεις:
+Each SignalK value includes a `$source` field indicating where the data came from:
 
-- [ ] NMEA2000 support (CAN bus)
-- [ ] Data logging to SD card
-- [ ] Historical data API
-- [ ] Alarm/notification system
-- [ ] Multi-vessel support
-- [ ] Chart plotter integration
+- `nmea0183.GPS`: Serial1 NMEA 0183 GPS
+- `nmea0183.Instrument`: Serial1 NMEA 0183 instruments
+- `nmea2000.can`: NMEA 2000 CAN bus
+- `gps.serial2`: GPS module on Serial2
+- `i2c.bme280`: BME280 I2C sensor
 
-## 📄 License
+## Troubleshooting
 
-MIT License - Free to use and modify!
+### WiFi Connection Issues
+
+**Problem**: Can't connect to WiFi network
+
+**Solution**:
+1. Connect to AP: `ESP32-SignalK` / `signalk123`
+2. Open `http://192.168.4.1`
+3. Reconfigure WiFi credentials
+4. Check serial monitor for connection status
+
+### CAN Bus Not Working
+
+**Problem**: No NMEA 2000 data received
+
+**Solution**:
+1. Check CAN bus termination (120Ω required)
+2. Verify CAN_H and CAN_L connections
+3. Check serial monitor for "NMEA2000 initialized successfully"
+4. Verify NMEA 2000 network is powered and active
+
+### GPS Not Working
+
+**Problem**: No position data
+
+**Solution**:
+1. Check GPS module power (3.3V)
+2. Verify GPS TX → ESP32 GPIO 25 connection
+3. Ensure GPS has clear sky view
+4. Check serial monitor for GPS sentences
+5. Wait 30-60 seconds for GPS fix
+
+### Push Notifications Not Working
+
+**Problem**: Mobile app not receiving notifications
+
+**Solution**:
+1. Verify Expo token registration: Check serial monitor
+2. Ensure mobile app has notification permissions
+3. Test alarm trigger manually
+4. Check WiFi connectivity
+5. Verify 3-second rate limiting isn't blocking messages
+
+### Serial Monitor Showing Errors
+
+**Error**: `WiFi connection lost`
+**Solution**: WiFi auto-reconnects every 5 seconds. Check router signal strength.
+
+**Error**: `NMEA2000 initialization failed`
+**Solution**: Check CAN bus wiring and termination resistors.
+
+**Error**: `No BME280 sensor detected`
+**Solution**: Normal if sensor not connected. Verify I2C wiring if sensor is present.
+
+## Performance
+
+- **RAM Usage**: ~15.9% (52KB / 328KB)
+- **Flash Usage**: ~41.9% (1.32MB / 3.14MB)
+- **WiFi Reconnect**: Every 5 seconds if disconnected
+- **Sensor Update Rate**: 2 seconds (I2C sensors)
+- **WebSocket Delta Rate**: 500ms minimum
+- **Push Notification Rate**: 3 seconds per alarm type
+
+## Development
+
+### Building from Source
+
+```bash
+# Install PlatformIO
+pip install platformio
+
+# Clone repository
+git clone [your-repo-url]
+cd esp32-signalk
+
+# Install dependencies
+pio lib install
+
+# Build
+pio run
+
+# Upload
+pio run --target upload
+
+# Monitor
+pio device monitor --baud 115200
+```
+
+### Project Structure
+
+```
+esp32-signalk/
+├── src/
+│   └── main.cpp           # Main application code
+├── platformio.ini         # PlatformIO configuration
+└── README.md             # This file
+```
+
+### Library Dependencies
+
+- WiFiManager 2.0.17
+- ESPAsyncWebServer
+- AsyncTCP
+- ArduinoJson 6.21.5
+- NMEA2000-library
+- NMEA2000_esp32
+- Adafruit BME280 Library
+- Adafruit Unified Sensor
+- Adafruit BusIO
+
+### Partition Scheme
+
+Uses `huge_app.csv` partition table:
+- **App**: 3MB (OTA support)
+- **NVS**: 20KB (settings storage)
+- **No SPIFFS**: All storage for application
+
+## Future Enhancements
+
+- [ ] RS485 NMEA 0183 support (requires additional UART)
+- [ ] SD card data logging
+- [ ] More NMEA 2000 PGNs (engine, rudder, AIS)
+- [ ] Compass/IMU support (heel, pitch, roll)
+- [ ] NMEA 0183 output (autopilot integration)
+- [ ] Web-based alarm configuration
+- [ ] Historical data graphs
+- [ ] AIS target tracking
+
+## License
+
+This project is open source. Feel free to use, modify, and distribute.
+
+## Credits
+
+- **NMEA2000 Library**: Timo Lappalainen
+- **SignalK Protocol**: SignalK Project
+- **ESP32 Arduino Core**: Espressif Systems
+- **WiFiManager**: tzapu
+
+## Support
+
+For issues, questions, or contributions:
+- Check serial monitor output first
+- Review this README thoroughly
+- Open an issue on GitHub
+
+## Safety Notice
+
+⚠️ **This system is for informational purposes only. Always use official marine navigation equipment for critical safety decisions. This device should supplement, not replace, proper marine navigation instruments.**
 
 ---
 
-**Made with ⚓ for the marine community**
+**Built with ❤️ for the marine community**
+
+*Last Updated: 2025*

@@ -26,10 +26,45 @@
 #include <map>
 #include <set>
 
+// NMEA2000 libraries
+#include <NMEA2000_CAN.h>
+#include <N2kMessages.h>
+
+// I2C and sensors
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+
 // ====== CONFIGURATION ======
-#define NMEA_RX 16
-#define NMEA_TX 17
+// LILYGO T-CAN485 Pin Definitions
+#define NMEA_RX 16                 // Serial1 RX (NMEA 0183 UART)
+#define NMEA_TX 17                 // Serial1 TX (NMEA 0183 UART)
 #define NMEA_BAUD 4800
+
+// GPS Module on Serial2
+#define GPS_RX 25                  // Serial2 RX for GPS module
+#define GPS_TX 26                  // Serial2 TX for GPS module
+#define GPS_BAUD 9600
+
+// RS485 on Serial3 (NMEA 0183 via RS485)
+#define RS485_RX 21                // Serial3 RX (RS485 module)
+#define RS485_TX 22                // Serial3 TX (RS485 module)
+#define RS485_DE 17                // RS485 Driver Enable (DE/RE pin)
+#define RS485_BAUD 4800
+
+// CAN Bus (NMEA 2000) - Uses ESP32 TWAI (built-in CAN controller)
+#define CAN_TX 5                   // CAN TX (connected to SN65HVD231)
+#define CAN_RX 35                  // CAN RX (connected to SN65HVD231) - Using GPIO 35
+
+// I2C Sensors (default ESP32 I2C pins, can be changed)
+#define I2C_SDA 18                 // I2C Data
+#define I2C_SCL 19                 // I2C Clock
+
+// RGB LED (conflicts with CAN if using GPIO 4)
+#define RGB_LED_PIN 4              // WS2812 RGB LED on T-CAN485
+
+// SD Card (already used by T-CAN485)
+// MISO: 2, MOSI: 15, SCK: 14, CS: 13
 
 #define WS_DELTA_MIN_MS 500        // Minimum delta broadcast interval (500ms for faster updates)
 #define WS_CLEANUP_MS 5000         // WebSocket cleanup interval
@@ -375,6 +410,20 @@ struct WindAlarmConfig {
 // SignalK Notifications storage
 std::map<String, String> notifications; // path -> state ("alarm", "warn", "alert", "normal")
 
+// ====== HARDWARE SUPPORT ======
+// NMEA2000 CAN Bus (NMEA2000 global is defined by library)
+bool n2kEnabled = false;
+
+// I2C Sensors
+Adafruit_BME280 bme;
+bool bmeEnabled = false;
+unsigned long lastSensorRead = 0;
+const unsigned long SENSOR_READ_INTERVAL = 2000; // Read sensors every 2 seconds
+
+// Serial port buffers
+String gpsBuffer = "";      // Serial2 GPS buffer
+// Note: ESP32 only has Serial, Serial1, Serial2. RS485 will use Serial2 if GPS not connected.
+
 // ====== UTILITY FUNCTIONS ======
 String generateUUID() {
   char uuid[57];
@@ -395,7 +444,7 @@ String iso8601Now() {
 }
 
 double knotsToMS(double knots) { return knots * 0.514444; }
-double msToKnots(double ms) { return ms / 0.514444; }
+// msToKnots is provided by NMEA2000 library
 double degToRad(double deg) { return deg * M_PI / 180.0; }
 
 // Haversine distance calculation (returns meters)
@@ -2964,6 +3013,189 @@ void processNmeaTcpServer() {
   }
 }
 
+// ====== NMEA2000 HANDLERS ======
+void HandleN2kPosition(const tN2kMsg &N2kMsg) {
+  unsigned char SID;
+  double latitude, longitude;
+
+  if (ParseN2kPGN129025(N2kMsg, latitude, longitude)) {
+    gpsData.lat = latitude;
+    gpsData.lon = longitude;
+    gpsData.timestamp = iso8601Now();
+
+    DynamicJsonDocument posDoc(128);
+    posDoc["latitude"] = latitude;
+    posDoc["longitude"] = longitude;
+    String posJson;
+    serializeJson(posDoc, posJson);
+    setPathValue("navigation.position", posJson, "nmea2000.can", "", "Vessel position");
+
+    Serial.printf("N2K Position: %.6f, %.6f\n", latitude, longitude);
+  }
+}
+
+void HandleN2kCOGSOG(const tN2kMsg &N2kMsg) {
+  unsigned char SID;
+  tN2kHeadingReference HeadingReference;
+  double COG, SOG;
+
+  if (ParseN2kPGN129026(N2kMsg, SID, HeadingReference, COG, SOG)) {
+    if (!N2kIsNA(COG)) {
+      gpsData.cog = COG;
+      setPathValue("navigation.courseOverGroundTrue", COG, "nmea2000.can", "rad", "Course over ground");
+    }
+    if (!N2kIsNA(SOG)) {
+      gpsData.sog = SOG;
+      setPathValue("navigation.speedOverGround", SOG, "nmea2000.can", "m/s", "Speed over ground");
+    }
+
+    Serial.printf("N2K COG/SOG: %.1f deg, %.2f m/s\n", RadToDeg(COG), SOG);
+  }
+}
+
+void HandleN2kWindSpeed(const tN2kMsg &N2kMsg) {
+  unsigned char SID;
+  double WindSpeed, WindAngle;
+  tN2kWindReference WindReference;
+
+  if (ParseN2kPGN130306(N2kMsg, SID, WindSpeed, WindAngle, WindReference)) {
+    if (WindReference == N2kWind_True_water || WindReference == N2kWind_True_North) {
+      if (!N2kIsNA(WindSpeed)) {
+        setPathValue("environment.wind.speedTrue", WindSpeed, "nmea2000.can", "m/s", "True wind speed");
+        updateWindAlarm(WindSpeed);
+      }
+      if (!N2kIsNA(WindAngle)) {
+        setPathValue("environment.wind.angleTrueWater", WindAngle, "nmea2000.can", "rad", "True wind angle");
+      }
+      Serial.printf("N2K Wind: %.1f m/s at %.0f deg\n", WindSpeed, RadToDeg(WindAngle));
+    }
+  }
+}
+
+void HandleN2kWaterDepth(const tN2kMsg &N2kMsg) {
+  unsigned char SID;
+  double DepthBelowTransducer, Offset, Range;
+
+  if (ParseN2kPGN128267(N2kMsg, SID, DepthBelowTransducer, Offset, Range)) {
+    if (!N2kIsNA(DepthBelowTransducer)) {
+      setPathValue("environment.depth.belowTransducer", DepthBelowTransducer, "nmea2000.can", "m", "Depth below transducer");
+      updateDepthAlarm(DepthBelowTransducer);
+      Serial.printf("N2K Depth: %.1f m\n", DepthBelowTransducer);
+    }
+  }
+}
+
+void HandleN2kOutsideEnvironment(const tN2kMsg &N2kMsg) {
+  unsigned char SID;
+  double WaterTemperature, OutsideAmbientAirTemperature, AtmosphericPressure;
+
+  if (ParseN2kPGN130310(N2kMsg, SID, WaterTemperature, OutsideAmbientAirTemperature, AtmosphericPressure)) {
+    if (!N2kIsNA(WaterTemperature)) {
+      double tempC = KelvinToC(WaterTemperature);
+      setPathValue("environment.water.temperature", WaterTemperature, "nmea2000.can", "K", "Water temperature");
+      Serial.printf("N2K Water Temp: %.1f°C\n", tempC);
+    }
+    if (!N2kIsNA(OutsideAmbientAirTemperature)) {
+      setPathValue("environment.outside.temperature", OutsideAmbientAirTemperature, "nmea2000.can", "K", "Outside air temperature");
+    }
+    if (!N2kIsNA(AtmosphericPressure)) {
+      setPathValue("environment.outside.pressure", AtmosphericPressure, "nmea2000.can", "Pa", "Atmospheric pressure");
+    }
+  }
+}
+
+void initNMEA2000() {
+  Serial.println("Initializing NMEA2000...");
+
+  // Set Product information
+  NMEA2000.SetProductInformation("00000001", // Manufacturer's Model serial code
+                                  100, // Manufacturer's product code
+                                  "ESP32 SignalK Gateway", // Manufacturer's Model ID
+                                  "1.0.0", // Manufacturer's Software version code
+                                  "1.0.0" // Manufacturer's Model version
+                                 );
+
+  // Set Device information
+  NMEA2000.SetDeviceInformation(1, // Unique number
+                                 130, // Device function=Display
+                                 25, // Device class=Network Device
+                                 2046 // Just choosen free from code list
+                                );
+
+  // Set message handlers
+  NMEA2000.SetMsgHandler(HandleN2kPosition);
+  NMEA2000.SetMsgHandler(HandleN2kCOGSOG);
+  NMEA2000.SetMsgHandler(HandleN2kWindSpeed);
+  NMEA2000.SetMsgHandler(HandleN2kWaterDepth);
+  NMEA2000.SetMsgHandler(HandleN2kOutsideEnvironment);
+
+  // Enable forward mode (listen only, don't claim address)
+  NMEA2000.SetForwardType(tNMEA2000::fwdt_Text);
+  NMEA2000.SetForwardStream(&Serial);
+  NMEA2000.SetMode(tNMEA2000::N2km_ListenOnly, 25);
+
+  if (NMEA2000.Open()) {
+    Serial.println("NMEA2000 initialized successfully");
+    n2kEnabled = true;
+  } else {
+    Serial.println("NMEA2000 initialization failed");
+    n2kEnabled = false;
+  }
+}
+
+// ====== I2C SENSOR HANDLERS ======
+void initI2CSensors() {
+  Serial.println("Initializing I2C sensors...");
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+
+  // Try to initialize BME280
+  if (bme.begin(0x76, &Wire)) {
+    Serial.println("BME280 sensor found!");
+    bmeEnabled = true;
+
+    // Configure BME280
+    bme.setSampling(Adafruit_BME280::MODE_NORMAL,
+                    Adafruit_BME280::SAMPLING_X1,  // temperature
+                    Adafruit_BME280::SAMPLING_X1,  // pressure
+                    Adafruit_BME280::SAMPLING_X1,  // humidity
+                    Adafruit_BME280::FILTER_OFF);
+  } else if (bme.begin(0x77, &Wire)) {
+    Serial.println("BME280 sensor found at alternate address!");
+    bmeEnabled = true;
+  } else {
+    Serial.println("No BME280 sensor detected");
+    bmeEnabled = false;
+  }
+}
+
+void readI2CSensors() {
+  if (!bmeEnabled) return;
+
+  unsigned long now = millis();
+  if (now - lastSensorRead < SENSOR_READ_INTERVAL) return;
+
+  lastSensorRead = now;
+
+  float temp = bme.readTemperature();
+  float pressure = bme.readPressure();
+  float humidity = bme.readHumidity();
+
+  if (!isnan(temp)) {
+    double tempK = temp + 273.15;
+    setPathValue("environment.inside.temperature", tempK, "i2c.bme280", "K", "Inside temperature");
+  }
+
+  if (!isnan(pressure)) {
+    setPathValue("environment.inside.pressure", pressure, "i2c.bme280", "Pa", "Inside pressure");
+  }
+
+  if (!isnan(humidity)) {
+    double relativeHumidity = humidity / 100.0;
+    setPathValue("environment.inside.humidity", relativeHumidity, "i2c.bme280", "", "Inside relative humidity");
+  }
+}
+
 // ====== SETUP ======
 void setup() {
   Serial.begin(115200);
@@ -3121,10 +3353,25 @@ void setup() {
     Serial.println("Error starting mDNS");
   }
 
-  // NMEA UART
+  // NMEA UART (Serial1)
   Serial.println("Starting NMEA UART...");
   Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
   Serial.println("NMEA0183 UART started on pins RX:" + String(NMEA_RX) + " TX:" + String(NMEA_TX));
+
+  // GPS Module (Serial2)
+  Serial.println("Starting GPS module...");
+  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
+  Serial.println("GPS UART started on pins RX:" + String(GPS_RX) + " TX:" + String(GPS_TX));
+
+  // Note: RS485 support requires hardware serial - can be added if GPS not used
+  // pinMode(RS485_DE, OUTPUT);
+  // digitalWrite(RS485_DE, LOW);
+
+  // Initialize NMEA2000 CAN Bus
+  initNMEA2000();
+
+  // Initialize I2C Sensors
+  initI2CSensors();
 
   // WebSocket setup
   Serial.println("Setting up WebSocket...");
@@ -3487,6 +3734,30 @@ void loop() {
       }
     }
   }
+
+  // Read GPS data from Serial2
+  while (Serial2.available()) {
+    char c = Serial2.read();
+
+    if (c == '\n' || c == '\r') {
+      if (gpsBuffer.length() > 6 && gpsBuffer[0] == '$') {
+        parseNMEASentence(gpsBuffer);  // GPS modules send NMEA 0183
+      }
+      gpsBuffer = "";
+    } else if (c >= 32 && c <= 126) {
+      if (gpsBuffer.length() < 120) {
+        gpsBuffer += c;
+      }
+    }
+  }
+
+  // Process NMEA2000 CAN messages
+  if (n2kEnabled) {
+    NMEA2000.ParseMessages();
+  }
+
+  // Read I2C sensors
+  readI2CSensors();
 
   // TCP client connection and data processing
   connectToTcpServer();
