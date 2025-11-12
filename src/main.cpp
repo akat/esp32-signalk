@@ -2644,21 +2644,42 @@ void setup() {
   Serial.println("Connect to configure WiFi network for internet access");
   Serial.println("============================\n");
 
+  // Configure WiFiManager
   wm.setDebugOutput(true);
   wm.setConfigPortalBlocking(false);  // Non-blocking mode
-  wm.setDisableConfigPortal(false);   // Keep AP + portal running after STA connects
-  wm.setWiFiAutoReconnect(true);      // Ensure STA stays connected while AP stays up
+  wm.setConfigPortalTimeout(0);       // Never timeout - always available
+  wm.setConnectTimeout(30);           // Connection attempt timeout
+  wm.setWiFiAutoReconnect(true);      // Auto reconnect to saved network
+  wm.setSaveConfigCallback([]() {
+    Serial.println("WiFi credentials saved!");
+  });
 
-  // Start config portal on demand - always available
-  // This starts the portal immediately and keeps it running
-  wm.startConfigPortal(AP_SSID, AP_PASSWORD);
+  // Try to connect with saved credentials
+  Serial.println("Attempting to connect with saved credentials...");
 
-  Serial.println("WiFiManager portal started on http://192.168.4.1");
-  Serial.println("Portal will remain active for WiFi configuration");
+  // autoConnect will try saved credentials and start portal if it fails
+  wm.autoConnect(AP_SSID, AP_PASSWORD);
 
-  // Check if WiFi credentials are already saved and connected
+  // Wait for connection attempt
+  Serial.print("Connecting");
+  int connectAttempts = 0;
+  while (WiFi.status() != WL_CONNECTED && connectAttempts < 20) {
+    delay(500);
+    Serial.print(".");
+    connectAttempts++;
+  }
+  Serial.println();
+
+  // Now start the web portal manually to ensure it's always available
+  // This keeps both AP and web portal running even when STA is connected
+  if (!wm.getWebPortalActive()) {
+    Serial.println("Starting web portal...");
+    wm.startWebPortal();
+  }
+
+  // Check connection status
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n=== WiFi Client Already Connected ===");
+    Serial.println("\n=== WiFi Client Connected ===");
     Serial.println("Connected to: " + WiFi.SSID());
     Serial.println("IP Address: " + WiFi.localIP().toString());
     Serial.println("============================\n");
@@ -2673,7 +2694,19 @@ void setup() {
       timeRetries++;
     }
     Serial.println(time(nullptr) > 100000 ? " OK" : " FAILED");
+  } else {
+    Serial.println("\n=== WiFi Not Connected ===");
+    Serial.println("Could not connect with saved credentials");
+    Serial.println("Please configure WiFi via portal");
+    Serial.println("============================\n");
   }
+
+  // Show both access points
+  Serial.println("\n=== WiFiManager Portal ===");
+  Serial.println("Portal: http://192.168.4.1");
+  Serial.println("SSID: " + String(AP_SSID));
+  Serial.println("Pass: " + String(AP_PASSWORD));
+  Serial.println("==========================\n");
 
   Serial.println("\n=== System Ready ===\n");
 }
