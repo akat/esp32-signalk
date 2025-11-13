@@ -11,6 +11,7 @@ extern GeofenceConfig geofence;
 extern DepthAlarmConfig depthAlarm;
 extern WindAlarmConfig windAlarm;
 extern String serverName;
+extern String vesselUUID;
 
 // Forward declarations of functions from main.cpp
 extern String iso8601Now();

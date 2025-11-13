@@ -166,5 +166,52 @@ void setupRoutes(AsyncWebServer& server) {
     }
   });
 
+  // Catch-all handler - route admin API and other paths if regex didn't match
+  server.onNotFound([](AsyncWebServerRequest* req) {
+    String url = req->url();
+
+    // Debug: Log what we're checking
+    Serial.printf("[DEBUG] onNotFound: method=%d, url=%s\n", req->method(), url.c_str());
+    Serial.printf("[DEBUG] HTTP_POST value=%d\n", HTTP_POST);
+    Serial.printf("[DEBUG] Checking admin API: POST=%d, starts=%d\n",
+                  (req->method() == HTTP_POST), url.startsWith("/api/admin/"));
+
+    // Check if this is an admin API POST request
+    // Use integer comparison instead of enum comparison
+    if (req->method() == 2 && url.startsWith("/api/admin/")) {
+      Serial.println("=== ROUTING ADMIN API POST (onNotFound fallback) ===");
+      Serial.printf("URL: %s\n", url.c_str());
+      handleAdminApiPost(req);
+      return;
+    }
+
+    // Check if this is an access request polling path
+    if (url.startsWith("/signalk/v1/access/requests/") && url.length() > 28) {
+      Serial.println("=== ROUTING ACCESS REQUEST BY ID (onNotFound fallback) ===");
+      Serial.printf("URL: %s\n", url.c_str());
+      if (req->method() == HTTP_GET) {
+        handleGetAccessRequestById(req);
+      }
+      return;
+    }
+
+    // Check if this is a vessels/self GET path
+    if (url.startsWith("/signalk/v1/api/vessels/self/") && url.length() > 29) {
+      Serial.println("=== ROUTING VESSELS/SELF PATH (onNotFound fallback) ===");
+      Serial.printf("URL: %s\n", url.c_str());
+      Serial.printf("Method: %d (GET=%d, PUT=%d)\n", req->method(), HTTP_GET, HTTP_PUT);
+
+      if (req->method() == HTTP_GET) {
+        handleGetPath(req);
+        return;
+      }
+    }
+
+    // Default 404
+    Serial.println("=== 404 NOT FOUND ===");
+    Serial.printf("No handler found for: %s\n", url.c_str());
+    req->send(404, "application/json", "{\"error\":\"Not found\"}");
+  });
+
   Serial.println("=== HTTP routes setup complete ===\n");
 }
