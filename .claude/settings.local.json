@@ -1,13 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(C:Usersakatsaris.platformiopenvScriptsplatformio.exe run:*)",
-      "Bash(pio run:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload)",
-      "Bash(python:*)",
-      "Bash(nul)",
-      "Bash(rm:*)"
+      "Bash(test:*)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target clean)"
     ],
     "deny": [],
     "ask": []
