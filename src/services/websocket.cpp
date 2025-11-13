@@ -23,6 +23,21 @@ extern void setPathValueJson(const String& path, const String& jsonValue, const 
 void broadcastDeltas() {
   // Removed throttling - broadcast immediately when data is available
 
+  // Debug: Log dataStore size and changed items
+  static uint32_t lastDebugDataStore = 0;
+  if (millis() - lastDebugDataStore > 10000) {  // Every 10 seconds
+    Serial.printf("DEBUG: dataStore size = %d\n", dataStore.size());
+    int changedCount = 0;
+    for (auto& kv : dataStore) {
+      if (kv.second.changed) {
+        changedCount++;
+        Serial.printf("  - CHANGED: %s\n", kv.first.c_str());
+      }
+    }
+    Serial.printf("DEBUG: Changed items = %d\n", changedCount);
+    lastDebugDataStore = millis();
+  }
+
   // Build delta message
   DynamicJsonDocument doc(4096);
   doc["context"] = "vessels." + vesselUUID;
@@ -165,112 +180,26 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
           if (fullPath == "navigation.anchor.akat" && value.is<JsonObject>()) {
             JsonObject obj = value.as<JsonObject>();
 
-            Serial.println("WS: === Processing navigation.anchor.akat update ===");
-
-            // Log current state BEFORE processing
-            Serial.printf("WS: Current state - geofence.enabled=%s, depth.enabled=%s, wind.enabled=%s\n",
-                          geofence.enabled ? "true" : "false",
-                          depthAlarm.enabled ? "true" : "false",
-                          windAlarm.enabled ? "true" : "false");
-
-            // Track what's being updated to determine user intent
-            bool depthAlarmChanged = false;
-            bool windAlarmChanged = false;
-            bool anchorPosChanged = false;
-            bool radiusChanged = false;
-
-            // Check depth alarm changes
-            if (obj.containsKey("depth")) {
-              JsonObject depth = obj["depth"];
-              if (depth.containsKey("alarm")) {
-                bool newDepthEnabled = depth["alarm"];
-                if (newDepthEnabled != depthAlarm.enabled) {
-                  depthAlarmChanged = true;
-                }
-              }
-              if (depth.containsKey("min_depth")) {
-                double newThreshold = depth["min_depth"];
-                if (abs(newThreshold - depthAlarm.threshold) > 0.01) {
-                  depthAlarmChanged = true;
-                }
-              }
-            }
-
-            // Check wind alarm changes
-            if (obj.containsKey("wind")) {
-              JsonObject wind = obj["wind"];
-              if (wind.containsKey("alarm")) {
-                bool newWindEnabled = wind["alarm"];
-                if (newWindEnabled != windAlarm.enabled) {
-                  windAlarmChanged = true;
-                }
-              }
-              if (wind.containsKey("max_speed")) {
-                double newThreshold = wind["max_speed"];
-                if (abs(newThreshold - windAlarm.threshold) > 0.01) {
-                  windAlarmChanged = true;
-                }
-              }
-            }
-
-            // Process anchor config
+            // Extract anchor position
             if (obj.containsKey("anchor")) {
               JsonObject anchor = obj["anchor"];
-
-              // Check position change
               if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
-                double newLat = anchor["lat"];
-                double newLon = anchor["lon"];
-                if (abs(newLat - geofence.anchorLat) > 0.00001 || abs(newLon - geofence.anchorLon) > 0.00001) {
-                  anchorPosChanged = true;
-                  Serial.printf("WS: Anchor position CHANGED: %.6f, %.6f -> %.6f, %.6f\n",
-                                geofence.anchorLat, geofence.anchorLon, newLat, newLon);
-                }
-                geofence.anchorLat = newLat;
-                geofence.anchorLon = newLon;
+                geofence.anchorLat = anchor["lat"];
+                geofence.anchorLon = anchor["lon"];
                 geofence.anchorTimestamp = millis();
+                Serial.printf("WS: Anchor set: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
               }
-
-              // Check radius change
               if (anchor.containsKey("radius")) {
-                double newRadius = anchor["radius"];
-                if (abs(newRadius - geofence.radius) > 0.1) {
-                  radiusChanged = true;
-                  Serial.printf("WS: Radius CHANGED: %.0f -> %.0f m\n", geofence.radius, newRadius);
-                }
-                geofence.radius = newRadius;
+                geofence.radius = anchor["radius"];
+                Serial.printf("WS: Geofence radius: %.0f m\n", geofence.radius);
               }
-
-              // SIMPLE LOGIC: Only update geofence.enabled if:
-              // - Anchor position changed, OR
-              // - Radius changed, OR
-              // - NEITHER depth NOR wind alarm changed (means it's a geofence-only update)
               if (anchor.containsKey("enabled")) {
-                bool newEnabled = anchor["enabled"];
-                bool isGeofenceUpdate = anchorPosChanged || radiusChanged || (!depthAlarmChanged && !windAlarmChanged);
-
-                Serial.printf("WS: Decision - newEnabled=%s, anchorPos=%s, radius=%s, depth=%s, wind=%s, isGeo=%s\n",
-                              newEnabled ? "T" : "F",
-                              anchorPosChanged ? "CHG" : "---",
-                              radiusChanged ? "CHG" : "---",
-                              depthAlarmChanged ? "CHG" : "---",
-                              windAlarmChanged ? "CHG" : "---",
-                              isGeofenceUpdate ? "YES" : "NO");
-
-                if (isGeofenceUpdate) {
-                  if (newEnabled != geofence.enabled) {
-                    geofence.enabled = newEnabled;
-                    Serial.printf("WS: Geofence enabled CHANGED to %s (geofence update)\n",
-                                  geofence.enabled ? "true" : "false");
-                  }
-                } else {
-                  Serial.printf("WS: IGNORING geofence.enabled=%s (depth/wind alarm update)\n",
-                                newEnabled ? "true" : "false");
-                }
+                geofence.enabled = anchor["enabled"];
+                Serial.printf("WS: Geofence enabled: %s\n", geofence.enabled ? "true" : "false");
               }
             }
 
-            // Update depth alarm settings
+            // Extract depth alarm config
             if (obj.containsKey("depth")) {
               JsonObject depth = obj["depth"];
               if (depth.containsKey("min_depth")) {
@@ -279,11 +208,11 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
               }
               if (depth.containsKey("alarm")) {
                 depthAlarm.enabled = depth["alarm"];
-                Serial.printf("WS: Depth alarm: %s\n", depthAlarm.enabled ? "ENABLED" : "DISABLED");
+                Serial.printf("WS: Depth alarm enabled: %s\n", depthAlarm.enabled ? "true" : "false");
               }
             }
 
-            // Update wind alarm settings
+            // Extract wind alarm config
             if (obj.containsKey("wind")) {
               JsonObject wind = obj["wind"];
               if (wind.containsKey("max_speed")) {
@@ -292,33 +221,9 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
               }
               if (wind.containsKey("alarm")) {
                 windAlarm.enabled = wind["alarm"];
-                Serial.printf("WS: Wind alarm: %s\n", windAlarm.enabled ? "ENABLED" : "DISABLED");
+                Serial.printf("WS: Wind alarm enabled: %s\n", windAlarm.enabled ? "true" : "false");
               }
             }
-
-            // Build the CORRECTED configuration with actual current state
-            DynamicJsonDocument correctedDoc(512);
-            JsonObject correctedObj = correctedDoc.to<JsonObject>();
-
-            JsonObject anchorObj = correctedObj.createNestedObject("anchor");
-            anchorObj["enabled"] = geofence.enabled;  // Use actual state, not what app sent
-            anchorObj["radius"] = geofence.radius;
-            anchorObj["lat"] = geofence.anchorLat;
-            anchorObj["lon"] = geofence.anchorLon;
-
-            JsonObject depthObj = correctedObj.createNestedObject("depth");
-            depthObj["alarm"] = depthAlarm.enabled;
-            depthObj["min_depth"] = depthAlarm.threshold;
-
-            JsonObject windObj = correctedObj.createNestedObject("wind");
-            windObj["alarm"] = windAlarm.enabled;
-            windObj["max_speed"] = windAlarm.threshold;
-
-            String correctedJson;
-            serializeJson(correctedObj, correctedJson);
-
-            Serial.printf("WS: Persisting corrected config: %s\n", correctedJson.c_str());
-            setPathValueJson("navigation.anchor.akat", correctedJson, source, "", "WebSocket update");
           }
         } else if (value.is<double>() || value.is<int>() || value.is<float>()) {
           setPathValue(fullPath, value.as<double>(), source, "", "WebSocket update");

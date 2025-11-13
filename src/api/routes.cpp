@@ -41,9 +41,8 @@ void setupRoutes(AsyncWebServer& server) {
     Serial.println("======================================\n");
   });
 
-  // WebSocket setup
+  // WebSocket setup - handler already registered in main.cpp
   Serial.println("Setting up WebSocket...");
-  ws.onEvent(nullptr);  // Event handler is registered in main
   server.addHandler(&ws);
   Serial.println("WebSocket setup complete");
 
@@ -195,7 +194,7 @@ void setupRoutes(AsyncWebServer& server) {
       return;
     }
 
-    // Check if this is a vessels/self GET path
+    // Check if this is a vessels/self GET or PUT path
     if (url.startsWith("/signalk/v1/api/vessels/self/") && url.length() > 29) {
       Serial.println("=== ROUTING VESSELS/SELF PATH (onNotFound fallback) ===");
       Serial.printf("URL: %s\n", url.c_str());
@@ -203,6 +202,11 @@ void setupRoutes(AsyncWebServer& server) {
 
       if (req->method() == HTTP_GET) {
         handleGetPath(req);
+        return;
+      } else if (req->method() == HTTP_PUT) {
+        // PUT with body is handled in onRequestBody callback
+        // Don't send 404 - body handler will respond after processing body
+        Serial.println("PUT request detected - waiting for body handler to process");
         return;
       }
     }
