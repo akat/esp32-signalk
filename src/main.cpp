@@ -509,43 +509,29 @@ void setup() {
   // SensESP v3.1.1 validates tokens by making GET request to /signalk/v1/stream
   // and expects HTTP 426 "Upgrade Required" to indicate valid token
   server.on("/signalk/v1/stream", HTTP_GET, [](AsyncWebServerRequest* req) {
-    Serial.println("\n=== GET /signalk/v1/stream (Token Validation) ===");
-    Serial.printf("Client IP: %s\n", req->client()->remoteIP().toString().c_str());
-
     // Check for Authorization header
     if (req->hasHeader("Authorization")) {
       String auth = req->header("Authorization");
-      Serial.printf("Authorization: %s\n", auth.c_str());
 
       // Extract token from "Bearer <token>" format
       if (auth.startsWith("Bearer ")) {
         String token = auth.substring(7);
         token.trim();
-        Serial.printf("Token: %s\n", token.c_str());
 
         // Check if token is in approved list
         if (approvedTokens.find(token) != approvedTokens.end()) {
-          Serial.println("Token found in approved list - returning 426");
           // Return 426 Upgrade Required - this tells SensESP the token is valid
           // and it should upgrade to WebSocket connection
           req->send(426, "text/plain", "Upgrade Required");
-          Serial.println("Response: 426 Upgrade Required");
-          Serial.println("======================================\n");
           return;
         } else {
-          Serial.println("Token NOT found in approved list - returning 401");
           req->send(401, "text/plain", "Unauthorized");
-          Serial.println("Response: 401 Unauthorized");
-          Serial.println("======================================\n");
           return;
         }
       }
     }
 
-    Serial.println("No valid Authorization header - returning 401");
     req->send(401, "text/plain", "Unauthorized");
-    Serial.println("Response: 401 Unauthorized");
-    Serial.println("======================================\n");
   });
 
   // WebSocket setup
@@ -600,7 +586,8 @@ void setup() {
   wm.setDebugOutput(true);
   wm.setConfigPortalBlocking(false);  // Non-blocking mode
   wm.setConfigPortalTimeout(0);       // Never timeout - always available
-  wm.setConnectTimeout(30);           // Connection attempt timeout
+  wm.setConnectTimeout(15);           // Connection attempt timeout (reduced to 15s)
+  wm.setConnectRetries(3);            // Maximum 3 connection attempts
   wm.setWiFiAutoReconnect(true);      // Auto reconnect to saved network
   wm.setSaveConfigCallback([]() {
     Serial.println("WiFi credentials saved!");
@@ -608,19 +595,29 @@ void setup() {
 
   // Try to connect with saved credentials
   Serial.println("Attempting to connect with saved credentials...");
+  Serial.println("Will timeout after 15 seconds if connection fails");
 
   // autoConnect will try saved credentials and start portal if it fails
-  wm.autoConnect(AP_SSID, AP_PASSWORD);
+  // It will automatically timeout after the configured time
+  bool connected = wm.autoConnect(AP_SSID, AP_PASSWORD);
 
-  // Wait for connection attempt
+  // Wait for connection attempt with timeout
   Serial.print("Connecting");
   int connectAttempts = 0;
-  while (WiFi.status() != WL_CONNECTED && connectAttempts < 20) {
+  uint32_t startTime = millis();
+  while (WiFi.status() != WL_CONNECTED && connectAttempts < 30 && (millis() - startTime) < 20000) {
     delay(500);
     Serial.print(".");
     connectAttempts++;
   }
   Serial.println();
+
+  // If stuck in association error, force disconnect
+  if (WiFi.status() != WL_CONNECTED && connectAttempts >= 30) {
+    Serial.println("Connection timeout - forcing disconnect");
+    WiFi.disconnect(true);
+    delay(1000);
+  }
 
   // Now start the web portal manually to ensure it's always available
   // This keeps both AP and web portal running even when STA is connected
@@ -667,7 +664,9 @@ void setup() {
 uint32_t lastWsCleanup = 0;
 uint32_t lastStatusLog = 0;
 uint32_t lastWifiCheck = 0;
+uint32_t lastWifiReconnect = 0;
 bool wasWifiConnected = false;
+int wifiReconnectAttempts = 0;
 
 void loop() {
   // Process WiFiManager (non-blocking)
@@ -684,17 +683,33 @@ void loop() {
       Serial.println("\n!!! WiFi connection lost !!!");
       Serial.println("Attempting to reconnect...");
       wasWifiConnected = false;
+      wifiReconnectAttempts = 0;
     }
 
     if (!isConnected) {
-      // Try to reconnect using saved credentials
-      WiFi.reconnect();
+      // Try to reconnect with exponential backoff
+      if (now - lastWifiReconnect > 10000) { // Try every 10 seconds
+        lastWifiReconnect = now;
+        wifiReconnectAttempts++;
+
+        if (wifiReconnectAttempts > 6) {
+          // After 6 failed attempts (~1 minute), force disconnect and reset
+          Serial.println("Too many reconnect failures - forcing reset");
+          WiFi.disconnect(true);
+          delay(2000);
+          wifiReconnectAttempts = 0;
+        } else {
+          Serial.printf("Reconnect attempt %d/6\n", wifiReconnectAttempts);
+          WiFi.reconnect();
+        }
+      }
     } else if (!wasWifiConnected) {
       // Just reconnected
       Serial.println("\n*** WiFi reconnected successfully ***");
       Serial.print("IP: ");
       Serial.println(WiFi.localIP());
       wasWifiConnected = true;
+      wifiReconnectAttempts = 0;
     } else {
       wasWifiConnected = true;
     }
