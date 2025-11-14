@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(test:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target clean)"
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target clean)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload)"
     ],
     "deny": [],
     "ask": []

@@ -550,8 +550,35 @@ void handleGetAccessRequestById(AsyncWebServerRequest* req) {
 
   Serial.printf("RequestId: %s\n", requestId.c_str());
 
+  // Check if we already have an approved token for this clientId
+  for (auto& pair : approvedTokens) {
+    if (pair.second.clientId == requestId) {
+      Serial.printf("Client %s already has approved token: %s\n", requestId.c_str(), pair.second.token.c_str());
+
+      DynamicJsonDocument response(512);
+      response["state"] = "COMPLETED";
+      response["statusCode"] = 200;
+      response["requestId"] = requestId;
+
+      JsonObject accessRequest = response.createNestedObject("accessRequest");
+      accessRequest["permission"] = "APPROVED";
+      accessRequest["token"] = pair.second.token;
+
+      String output;
+      serializeJson(response, output);
+
+      Serial.printf("Returning existing token from flash storage\n");
+      Serial.printf("Response JSON: %s\n", output.c_str());
+      Serial.println("==============================\n");
+
+      req->send(200, "application/json", output);
+      return;
+    }
+  }
+
   if (accessRequests.find(requestId) == accessRequests.end()) {
     Serial.println("RequestId not found - Auto-generating approval for SensESP compatibility");
+    Serial.println("This handles the case where ESP32 reboots and SensESP has an old requestId");
 
     String newToken = generateUUID();
 
@@ -578,6 +605,7 @@ void handleGetAccessRequestById(AsyncWebServerRequest* req) {
     serializeJson(response, output);
 
     Serial.printf("Auto-approved! Generated token: %s\n", newToken.c_str());
+    Serial.printf("Token saved to flash storage\n");
     Serial.printf("Response JSON: %s\n", output.c_str());
     Serial.println("==============================\n");
 
