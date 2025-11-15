@@ -182,6 +182,29 @@ void HandleN2kOutsideEnvironment(const tN2kMsg &N2kMsg) {
     }
   }
 }
+ 
+// Central dispatcher for the general SetMsgHandler callback.
+static void HandleN2kMessage(const tN2kMsg &N2kMsg) {
+  switch (N2kMsg.PGN) {
+    case 129025UL:
+      HandleN2kPosition(N2kMsg);
+      break;
+    case 129026UL:
+      HandleN2kCOGSOG(N2kMsg);
+      break;
+    case 130306UL:
+      HandleN2kWindSpeed(N2kMsg);
+      break;
+    case 128267UL:
+      HandleN2kWaterDepth(N2kMsg);
+      break;
+    case 130310UL:
+      HandleN2kOutsideEnvironment(N2kMsg);
+      break;
+    default:
+      break;
+  }
+}
 
 void initNMEA2000() {
   Serial.println("\n=== Initializing NMEA2000 CAN Bus ===");
@@ -191,30 +214,28 @@ void initNMEA2000() {
   digitalWrite(CAN_SE_PIN, LOW);  // LOW = transceiver enabled
   Serial.println("CAN transceiver enabled (SE pin LOW)");
 
-  // Set Product information
-  NMEA2000.SetProductInformation("00000001", // Manufacturer's Model serial code
-                                  100, // Manufacturer's product code
-                                  "ESP32 SignalK Gateway", // Manufacturer's Model ID
-                                  "1.0.0", // Manufacturer's Software version code
-                                  "1.0.0" // Manufacturer's Model version
-                                 );
+  // Product information (what chartplotters will display)
+  NMEA2000.SetProductInformation(
+    "ESP32N2K-0001",   // Serial code
+    100,               // Product code
+    "ESP32 N2K Gateway",
+    "1.0.0",           // Software version
+    "HW:1.0"           // Hardware version
+  );
   Serial.println("Product info set");
 
-  // Set Device information
-  NMEA2000.SetDeviceInformation(1, // Unique number
-                                 130, // Device function=Display
-                                 25, // Device class=Network Device
-                                 2046 // Just choosen free from code list
-                                );
+  // Device information (PGN 60928/126998 responses)
+  NMEA2000.SetDeviceInformation(
+    123,   // Unique number
+    140,   // Device function = Generic Display
+    25,    // Device class = Display
+    2046   // Manufacturer code reserved for experiments
+  );
   Serial.println("Device info set");
 
-  // Set message handlers
-  NMEA2000.SetMsgHandler(HandleN2kPosition);
-  NMEA2000.SetMsgHandler(HandleN2kCOGSOG);
-  NMEA2000.SetMsgHandler(HandleN2kWindSpeed);
-  NMEA2000.SetMsgHandler(HandleN2kWaterDepth);
-  NMEA2000.SetMsgHandler(HandleN2kOutsideEnvironment);
-  Serial.println("Message handlers registered");
+  // Single dispatcher registered with the library
+  NMEA2000.SetMsgHandler(HandleN2kMessage);
+  Serial.println("Message handler registered");
 
   // Enable forward mode to see ALL raw NMEA2000 messages on Serial
   NMEA2000.SetForwardType(tNMEA2000::fwdt_Text);
@@ -222,37 +243,29 @@ void initNMEA2000() {
   NMEA2000.EnableForward(true);  // Make sure forwarding is enabled
   Serial.println("Forward mode enabled - will show ALL N2K messages on bus");
 
-  // Try ListenOnly mode first to test if we can receive messages
-  // ListenOnly = doesn't claim address, just listens to the bus
-  NMEA2000.SetMode(tNMEA2000::N2km_ListenOnly);
-  Serial.println("Mode: ListenOnly (testing reception - no address claim)");
+  const uint8_t preferredAddress = 25;  // Recommended gateway address
+  NMEA2000.SetMode(tNMEA2000::N2km_ListenAndNode, preferredAddress);
+  NMEA2000.SetN2kCANMsgBufSize(60);
+  NMEA2000.SetN2kCANSendFrameBufSize(30);
+  Serial.println("Mode: NodeOnly (address claim enabled)");
 
   if (NMEA2000.Open()) {
-    Serial.println("✅ NMEA2000 CAN bus opened successfully");
-    Serial.println("\n📋 Configuration:");
-    Serial.println("  - Mode: LISTEN ONLY (testing reception)");
-    Serial.println("  - CAN TX Pin: GPIO 27 (TTGO T-CAN485)");
-    Serial.println("  - CAN RX Pin: GPIO 26 (TTGO T-CAN485)");
-    Serial.println("  - I2C conflict: RESOLVED (disabled)");
-    Serial.println("\n🔍 RECEPTION TEST MODE:");
-    Serial.println("  If you see messages from Garmin below:");
-    Serial.println("  ✓ Reception works! Will switch to NodeOnly mode");
-    Serial.println("  ✗ No messages = wiring or termination issue");
-    Serial.println("\n⚠️  Still no messages? Try:");
-    Serial.println("  1. Swap CAN_H and CAN_L wires");
-    Serial.println("  2. Check 120Ω termination resistors");
-    Serial.println("  3. Verify 12V power and GND on backbone");
-    Serial.println("  4. Ensure Garmin is fully powered on");
-    Serial.println("\n📡 Waiting for NMEA2000 traffic...");
+    Serial.println("NMEA2000 CAN bus opened successfully");
+    Serial.println("\nConfiguration:");
+    Serial.println("  - Mode: NodeOnly (address claim + talker)");
+    Serial.printf("  - Preferred address: %u\n", preferredAddress);
+    Serial.printf("  - CAN TX Pin: %d\n", static_cast<int>(CAN_TX_PIN));
+    Serial.printf("  - CAN RX Pin: %d\n", static_cast<int>(CAN_RX_PIN));
+    Serial.println("  - Forwarding: text to Serial");
     Serial.println("======================================\n");
     n2kEnabled = true;
   } else {
     Serial.println("ERROR: NMEA2000 CAN bus initialization FAILED!");
     Serial.println("This means the CAN hardware is not responding!");
     Serial.println("\nPossible causes:");
-    Serial.println("  - Wrong GPIO pins (should be TX=5, RX=4)");
+    Serial.println("  - Wrong GPIO pins or wiring");
     Serial.println("  - CAN transceiver chip failure");
-    Serial.println("  - No power to CAN transceiver");
+    Serial.println("  - No power or missing ground on CAN backbone");
     Serial.println("======================================\n");
     n2kEnabled = false;
   }
