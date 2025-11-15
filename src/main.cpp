@@ -50,6 +50,7 @@
 #include "utils/uuid.h"
 #include "utils/time_utils.h"
 #include "utils/conversions.h"
+#include "utils/nmea0183_converter.h"
 
 // ====== SIGNALK DATA MODULES ======
 #include "signalk/globals.h"
@@ -60,6 +61,7 @@
 #include "services/expo_push.h"
 #include "services/alarms.h"
 #include "services/websocket.h"
+#include "services/nmea0183_tcp.h"
 
 // ====== HARDWARE MODULES ======
 #include "hardware/nmea0183.h"
@@ -379,21 +381,32 @@ void setup() {
       JsonObject obj = doc.as<JsonObject>();
 
       // Extract anchor position
+      bool anchorPositionUpdated = false;
       if (obj.containsKey("anchor")) {
         JsonObject anchor = obj["anchor"];
         if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
           geofence.anchorLat = anchor["lat"];
           geofence.anchorLon = anchor["lon"];
           geofence.anchorTimestamp = millis();
+          anchorPositionUpdated = true;
           Serial.printf("Restored anchor: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
         }
         if (anchor.containsKey("radius")) {
           geofence.radius = anchor["radius"];
           Serial.printf("Restored radius: %.0f m\n", geofence.radius);
         }
-        if (anchor.containsKey("enabled")) {
-          geofence.enabled = anchor["enabled"];
-          Serial.printf("Restored geofence enabled: %s\n", geofence.enabled ? "true" : "false");
+         // IMPORTANT: Only update geofence.enabled if anchor position is also being set
+        // This prevents depth/wind alarm updates from accidentally enabling geofence
+        if (anchor.containsKey("enabled") && anchorPositionUpdated) {
+          bool newEnabled = anchor["enabled"];
+          if (newEnabled != geofence.enabled) {
+            geofence.enabled = newEnabled;
+            Serial.printf("Geofence enabled changed to: %s\n", geofence.enabled ? "true" : "false");
+          } else {
+            Serial.printf("Geofence enabled unchanged: %s\n", geofence.enabled ? "true" : "false");
+          }
+        } else if (anchor.containsKey("enabled") && !anchorPositionUpdated) {
+          Serial.printf("Ignoring geofence.enabled update - no anchor position in request\n");
         }
       }
 
@@ -405,8 +418,13 @@ void setup() {
           Serial.printf("Restored depth threshold: %.1f m\n", depthAlarm.threshold);
         }
         if (depth.containsKey("alarm")) {
-          depthAlarm.enabled = depth["alarm"];
-          Serial.printf("Restored depth alarm: %s\n", depthAlarm.enabled ? "true" : "false");
+          bool newEnabled = depth["alarm"];
+          if (newEnabled != depthAlarm.enabled) {
+            depthAlarm.enabled = newEnabled;
+            Serial.printf("Depth alarm enabled changed to: %s\n", depthAlarm.enabled ? "true" : "false");
+          } else {
+            Serial.printf("Depth alarm enabled unchanged: %s\n", depthAlarm.enabled ? "true" : "false");
+          }
         }
       }
 
@@ -418,8 +436,13 @@ void setup() {
           Serial.printf("Restored wind threshold: %.1f kn\n", windAlarm.threshold);
         }
         if (wind.containsKey("alarm")) {
-          windAlarm.enabled = wind["alarm"];
-          Serial.printf("Restored wind alarm: %s\n", windAlarm.enabled ? "true" : "false");
+          bool newEnabled = wind["alarm"];
+          if (newEnabled != windAlarm.enabled) {
+            windAlarm.enabled = newEnabled;
+            Serial.printf("Wind alarm enabled changed to: %s\n", windAlarm.enabled ? "true" : "false");
+          } else {
+            Serial.printf("Wind alarm enabled unchanged: %s\n", windAlarm.enabled ? "true" : "false");
+          }
         }
       }
     }
@@ -503,6 +526,9 @@ void setup() {
 
   // Initialize I2C Sensors
   initI2CSensors();
+
+  // Initialize NMEA 0183 TCP Server (port 10110)
+  initNMEA0183Server();
 
   // HTTP GET handler for /signalk/v1/stream - Token validation for SensESP
   // IMPORTANT: This MUST be registered BEFORE the WebSocket handler!
@@ -770,6 +796,9 @@ void loop() {
 
   // Read I2C sensors
   readI2CSensors();
+
+  // Process NMEA 0183 TCP Server (port 10110)
+  processNMEA0183Server();
 
   // TCP client connection and data processing
   connectToTcpServer();

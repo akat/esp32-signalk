@@ -6,10 +6,10 @@ extern Adafruit_BME280 bme;
 extern bool bmeEnabled;
 extern unsigned long lastSensorRead;
 
-// I2C Pin definitions (from main configuration)
-// These should match the pin definitions in main_original.cpp
-#define I2C_SDA 5  // I2C Data
-#define I2C_SCL 32 // I2C Clock
+// I2C Pin definitions
+// TTGO T-CAN485 uses GPIO 27/26 for CAN, so GPIO 21/22 are free for I2C
+#define I2C_SDA 21 // I2C Data
+#define I2C_SCL 22 // I2C Clock
 
 // Helper functions (declared in main)
 extern void setPathValue(const String& path, double value, const String& source,
@@ -19,6 +19,7 @@ extern void setPathValue(const String& path, double value, const String& source,
 
 void initI2CSensors() {
   Serial.println("Initializing I2C sensors...");
+  Serial.println("I2C pins: SDA=21, SCL=22");
 
   Wire.begin(I2C_SDA, I2C_SCL);
 

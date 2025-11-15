@@ -1,7 +1,13 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// NMEA Configuration
+// NMEA2000 CAN Bus Configuration (TTGO T-CAN485 board)
+// Correct pins for TTGO T-CAN485 hardware
+#define CAN_TX_PIN GPIO_NUM_27
+#define CAN_RX_PIN GPIO_NUM_26
+#define CAN_SE_PIN GPIO_NUM_23  // Silent/Enable pin
+
+// NMEA0183 Configuration
 #define NMEA_RX 16
 #define NMEA_TX 17
 #define NMEA_BAUD 4800
@@ -18,6 +24,12 @@
 
 // TCP Configuration
 #define TCP_RECONNECT_DELAY 5000   // TCP reconnect delay in milliseconds
+
+// NMEA 0183 TCP Server Configuration
+#define NMEA_TCP_PORT 10110        // Standard NMEA 0183 TCP port
+#define MAX_NMEA_CLIENTS 8         // Maximum simultaneous TCP clients
+#define CLIENT_TIMEOUT_MS 30000    // TCP client timeout (30 seconds)
+#define CLIENT_BUFFER_SIZE 512     // Buffer size per client
 
 // NMEA Rate Limiting
 #define NMEA_CLIENT_TIMEOUT 10000  // Client timeout in milliseconds
