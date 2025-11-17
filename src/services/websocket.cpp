@@ -228,55 +228,6 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
           setPathValueJson(fullPath, jsonStr, source, "", "WebSocket update");
           Serial.printf("WS: Stored JSON value for path: %s\n", fullPath.c_str());
 
-          // Special handling for navigation.anchor.akat (6pack app config)
-          if (fullPath == "navigation.anchor.akat" && value.is<JsonObject>()) {
-            JsonObject obj = value.as<JsonObject>();
-
-            // Extract anchor position
-            if (obj.containsKey("anchor")) {
-              JsonObject anchor = obj["anchor"];
-              if (anchor.containsKey("lat") && anchor.containsKey("lon")) {
-                geofence.anchorLat = anchor["lat"];
-                geofence.anchorLon = anchor["lon"];
-                geofence.anchorTimestamp = millis();
-                Serial.printf("WS: Anchor set: %.6f, %.6f\n", geofence.anchorLat, geofence.anchorLon);
-              }
-              if (anchor.containsKey("radius")) {
-                geofence.radius = anchor["radius"];
-                Serial.printf("WS: Geofence radius: %.0f m\n", geofence.radius);
-              }
-              if (anchor.containsKey("enabled")) {
-                geofence.enabled = anchor["enabled"];
-                Serial.printf("WS: Geofence enabled: %s\n", geofence.enabled ? "true" : "false");
-              }
-            }
-
-            // Extract depth alarm config
-            if (obj.containsKey("depth")) {
-              JsonObject depth = obj["depth"];
-              if (depth.containsKey("min_depth")) {
-                depthAlarm.threshold = depth["min_depth"];
-                Serial.printf("WS: Depth threshold: %.1f m\n", depthAlarm.threshold);
-              }
-              if (depth.containsKey("alarm")) {
-                depthAlarm.enabled = depth["alarm"];
-                Serial.printf("WS: Depth alarm enabled: %s\n", depthAlarm.enabled ? "true" : "false");
-              }
-            }
-
-            // Extract wind alarm config
-            if (obj.containsKey("wind")) {
-              JsonObject wind = obj["wind"];
-              if (wind.containsKey("max_speed")) {
-                windAlarm.threshold = wind["max_speed"];
-                Serial.printf("WS: Wind threshold: %.1f kn\n", windAlarm.threshold);
-              }
-              if (wind.containsKey("alarm")) {
-                windAlarm.enabled = wind["alarm"];
-                Serial.printf("WS: Wind alarm enabled: %s\n", windAlarm.enabled ? "true" : "false");
-              }
-            }
-          }
         } else if (value.is<double>() || value.is<int>() || value.is<float>()) {
           setPathValue(fullPath, value.as<double>(), source, "", "WebSocket update");
         } else if (value.is<bool>()) {
