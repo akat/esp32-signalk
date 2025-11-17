@@ -14,7 +14,8 @@
       "Bash(taskkill:*)",
       "Bash(del nul)",
       "Bash(rm:*)",
-      "Bash(cmd /c \"tasklist /FI \"\"IMAGENAME eq python.exe\"\"\")"
+      "Bash(cmd /c \"tasklist /FI \"\"IMAGENAME eq python.exe\"\"\")",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

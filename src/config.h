@@ -19,6 +19,10 @@
 #define GPS_RX 25
 #define GPS_TX 18
 
+// LED Status Indicators (WS2812 RGB LED on TTGO T-CAN485)
+#define LED_PIN 4              // WS2812 RGB LED pin
+#define LED_COUNT 1            // Single RGB LED on board
+
 // WebSocket Configuration
 #define WS_DELTA_MIN_MS 100        // Minimum delta broadcast interval
 #define WS_CLEANUP_MS 5000         // WebSocket cleanup interval

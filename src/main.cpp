@@ -68,6 +68,7 @@
 #include "hardware/nmea0183.h"
 #include "hardware/nmea2000.h"
 #include "hardware/sensors.h"
+#include "hardware/led_status.h"
 
 // ====== API MODULES ======
 #include "api/security.h"
@@ -264,6 +265,10 @@ void setup() {
   Serial.println("\n\n=== ESP32 SignalK Server ===\n");
   Serial.println("Firmware compiled with NMEA TCP server support");
   Serial.println("Ready to receive NMEA data on port 10110\n");
+
+  // Initialize LED status indicators first
+  Serial.println("Initializing LED status indicators...");
+  initLEDs();
 
   // Early debug output to verify we're running
   Serial.println("Setup starting...");
@@ -634,6 +639,10 @@ void loop() {
 
   // Check WiFi connection and reconnect if needed
   uint32_t now = millis();
+
+  // Update LED status indicators based on WiFi connection
+  bool isConnectedToInternet = (WiFi.status() == WL_CONNECTED);
+  updateLEDs(isConnectedToInternet);
   if (now - lastWifiCheck > 5000) { // Check every 5 seconds
     lastWifiCheck = now;
     bool isConnected = (WiFi.status() == WL_CONNECTED);
