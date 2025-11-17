@@ -41,51 +41,135 @@ const char* HTML_UI = R"html(
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SignalK Server</title>
   <style>
+    :root {
+      --bg: #f5f7fb;
+      --card-bg: #ffffff;
+      --primary: #1f7afc;
+      --primary-dark: #1554c0;
+      --text: #1f2a37;
+      --muted: #5d6b82;
+      --border: #e4e7ec;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
     .container { max-width: 1200px; margin: 0 auto; }
-    h1 { font-size: 24px; margin-bottom: 20px; color: #333; }
-    .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .status { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: 500; }
-    .status.connected { background: #4caf50; color: white; }
-    .status.disconnected { background: #f44336; color: white; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #eee; font-size: 14px; }
-    th { font-weight: 600; color: #666; background: #f9f9f9; }
-    code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 13px; }
-    .value { font-weight: 500; color: #2196f3; }
-    .timestamp { color: #999; font-size: 12px; }
-    a { color: #2196f3; text-decoration: none; font-weight: 500; }
-    a:hover { text-decoration: underline; }
+
+    .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
+    .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
+    .hero-content { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .hero-text .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; opacity: 0.85; margin-bottom: 8px; }
+    .hero-text h1 { font-size: 30px; margin-bottom: 8px; }
+    .hero-text .subtitle { font-size: 15px; color: rgba(255,255,255,0.88); max-width: 520px; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+    .btn-link { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; border-radius: 999px; font-weight: 600; text-decoration: none; border: 1px solid rgba(255,255,255,0.5); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .btn-link.primary { background: #fff; color: #1f2a37; border-color: transparent; }
+    .btn-link.secondary { color: #fff; }
+    .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
+
+    h2 { font-size: 20px; margin-bottom: 6px; }
+    .muted { color: var(--muted); font-size: 14px; }
+    code { background: #f0f4ff; padding: 6px 10px; border-radius: 8px; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; display: inline-block; width: 100%; word-break: break-all; }
+
+    .status-row { display: flex; flex-direction: column; gap: 16px; }
+    .label { text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; }
+    .status-pill.connected { background: #d1fae5; color: #15803d; }
+    .status-pill.disconnected { background: #fee2e2; color: #b91c1c; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .summary-item { background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 14px; padding: 14px; }
+
+    .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .table-wrapper { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 520px; }
+    th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: top; }
+    th { text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; color: var(--muted); background: #f8fafc; }
+    th.path-col, td.path-col { width: 50%; }
+    .value { font-weight: 600; color: var(--primary); }
+    .timestamp { color: #98a2b3; font-size: 12px; }
+
+    @media (max-width: 900px) {
+      .hero-content { flex-direction: column; }
+      .hero-actions { width: 100%; }
+      .btn-link { flex: 1 1 auto; justify-content: center; }
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 18px; }
+      .card { padding: 20px; }
+      .hero-text h1 { font-size: 26px; }
+    }
+
+    @media (max-width: 640px) {
+      table, thead, tbody, th, td, tr { display: block; width: 100%; }
+      thead { display: none; }
+      .table-wrapper { border: none; }
+      tr { background: #fff; border: 1px solid var(--border); border-radius: 14px; margin-bottom: 14px; padding: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05); }
+      td { border: none; padding: 8px 0; display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+      td::before { content: attr(data-label); font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+      td.path-col { flex-direction: column; }
+      td.path-col code { margin-top: 4px; }
+      td:last-child { border-bottom: none; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>SignalK Server - ESP32</h1>
-    <div style="margin-bottom: 20px;">
-      <a href="/config">TCP Configuration</a>
+    <div class="card hero-card">
+      <div class="hero-content">
+        <div class="hero-text">
+          <p class="eyebrow">SignalK Server</p>
+          <h1>Vessel Dashboard</h1>
+          <p class="subtitle">Monitor live SignalK data from your ESP32 gateway and confirm connections at a glance.</p>
+        </div>
+        <div class="hero-actions">
+          <a href="/config" class="btn-link primary">TCP Settings</a>
+          <a href="/admin" class="btn-link secondary">Admin Panel</a>
+        </div>
+      </div>
     </div>
 
     <div class="card">
-      <strong>WebSocket:</strong> <span id="ws-status" class="status disconnected">Disconnected</span>
-      <br><br>
-      <strong>Server:</strong> <code id="server-url"></code><br>
-      <strong>Vessel UUID:</strong> <code id="vessel-uuid"></code>
+      <div class="status-row">
+        <div>
+          <p class="label">WebSocket Status</p>
+          <span id="ws-status" class="status-pill disconnected">Disconnected</span>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <p class="label">Server URL</p>
+            <code id="server-url"></code>
+          </div>
+          <div class="summary-item">
+            <p class="label">Vessel UUID</p>
+            <code id="vessel-uuid"></code>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="card">
-      <h2 style="font-size: 18px; margin-bottom: 15px;">Navigation Data</h2>
-      <table id="data-table">
-        <thead>
-          <tr>
-            <th>Path</th>
-            <th>Value</th>
-            <th>Units</th>
-            <th>Timestamp</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+      <div class="card-header">
+        <div>
+          <h2>Navigation Data</h2>
+          <p class="muted">Live SignalK deltas streamed over WebSocket.</p>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table id="data-table">
+          <thead>
+            <tr>
+              <th class="path-col">Path</th>
+              <th>Value</th>
+              <th>Units</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -100,7 +184,7 @@ const char* HTML_UI = R"html(
 
     ws.onopen = () => {
       statusEl.textContent = 'Connected';
-      statusEl.className = 'status connected';
+      statusEl.className = 'status-pill connected';
 
       ws.send(JSON.stringify({
         context: '*',
@@ -110,7 +194,7 @@ const char* HTML_UI = R"html(
 
     ws.onclose = () => {
       statusEl.textContent = 'Disconnected';
-      statusEl.className = 'status disconnected';
+      statusEl.className = 'status-pill disconnected';
     };
 
     ws.onmessage = (event) => {
@@ -129,7 +213,7 @@ const char* HTML_UI = R"html(
                 let value = item.value;
 
                 if (typeof value === 'number') {
-                  value = value.toFixed(6);
+                  value = Number.isInteger(value) ? value : value.toFixed(6);
                 } else if (typeof value === 'object') {
                   value = JSON.stringify(value);
                 }
@@ -137,7 +221,8 @@ const char* HTML_UI = R"html(
                 paths.set(path, {
                   value: value,
                   timestamp: update.timestamp || '',
-                  units: item.units || ''
+                  units: item.units || '',
+                  description: item.description || ''
                 });
               });
             }
@@ -159,15 +244,23 @@ const char* HTML_UI = R"html(
         const tr = document.createElement('tr');
 
         const pathTd = document.createElement('td');
+        pathTd.className = 'path-col';
+        pathTd.dataset.label = 'Path';
         pathTd.innerHTML = `<code>${path}</code>`;
+        if (data.description) {
+          pathTd.title = data.description;
+        }
 
         const valueTd = document.createElement('td');
+        valueTd.dataset.label = 'Value';
         valueTd.innerHTML = `<span class="value">${data.value}</span>`;
 
         const unitsTd = document.createElement('td');
-        unitsTd.textContent = data.units;
+        unitsTd.dataset.label = 'Units';
+        unitsTd.textContent = data.units || '--';
 
         const tsTd = document.createElement('td');
+        tsTd.dataset.label = 'Timestamp';
         tsTd.innerHTML = `<span class="timestamp">${data.timestamp}</span>`;
 
         tr.appendChild(pathTd);
@@ -191,65 +284,147 @@ const char* HTML_CONFIG = R"html(
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>TCP Configuration - SignalK</title>
   <style>
+    :root {
+      --bg: #f5f7fb;
+      --card-bg: #ffffff;
+      --primary: #1f7afc;
+      --primary-dark: #1554c0;
+      --text: #1f2a37;
+      --muted: #5d6b82;
+      --border: #e4e7ec;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
-    .container { max-width: 600px; margin: 0 auto; }
-    h1 { font-size: 24px; margin-bottom: 20px; color: #333; }
-    .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    label { display: block; margin-bottom: 8px; font-weight: 500; color: #333; }
-    input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 16px; }
-    .checkbox-wrapper { margin-bottom: 20px; }
-    input[type="checkbox"] { width: 20px; height: 20px; margin-right: 8px; cursor: pointer; }
-    button { background: #2196f3; color: white; padding: 12px 24px; border: none; border-radius: 4px; font-size: 16px; font-weight: 500; cursor: pointer; width: 100%; margin-bottom: 10px; }
-    button:hover { background: #1976d2; }
-    button.secondary { background: #757575; }
-    button.secondary:hover { background: #616161; }
-    .info { background: #e3f2fd; padding: 12px; border-radius: 4px; margin-bottom: 20px; font-size: 14px; color: #1976d2; }
-    .status { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: 500; margin-top: 12px; }
-    .status.connected { background: #4caf50; color: white; }
-    .status.disconnected { background: #f44336; color: white; }
-    a { color: #2196f3; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
+    .container { max-width: 800px; margin: 0 auto; }
+
+    .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
+    .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
+    .hero-content { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .hero-text .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; opacity: 0.85; margin-bottom: 8px; }
+    .hero-text h1 { font-size: 30px; margin-bottom: 8px; }
+    .hero-text .subtitle { font-size: 15px; color: rgba(255,255,255,0.88); max-width: 520px; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+    .btn-link { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; border-radius: 999px; font-weight: 600; text-decoration: none; border: 1px solid rgba(255,255,255,0.5); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .btn-link.primary { background: #fff; color: #1f2a37; border-color: transparent; }
+    .btn-link.secondary { color: #fff; }
+    .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
+
+    .muted { color: var(--muted); font-size: 14px; }
+    .subtle-card { background: #eef4ff; border: 1px solid #dbe4ff; color: var(--muted); }
+
+    label { display: block; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+    input[type="text"], input[type="number"] { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; background: #f9fafb; transition: border 0.2s ease; }
+    input[type="text"]:focus, input[type="number"]:focus { border-color: var(--primary); outline: none; background: #fff; }
+
+    .form-grid { display: flex; flex-direction: column; gap: 18px; }
+    .checkbox-field { display: flex; gap: 12px; align-items: flex-start; }
+    .checkbox-field input { width: 20px; height: 20px; margin-top: 4px; }
+    .button-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { border: none; border-radius: 12px; padding: 12px 18px; font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .btn.primary { background: var(--primary); color: #fff; box-shadow: 0 12px 30px rgba(31, 122, 252, 0.25); }
+    .btn.primary:hover { transform: translateY(-1px); }
+    .btn.secondary { background: #e4e7ec; color: #1f2a37; }
+
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; }
+    .status-pill.connected { background: #d1fae5; color: #15803d; }
+    .status-pill.disconnected { background: #fee2e2; color: #b91c1c; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .summary-item { background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 14px; padding: 14px; }
+    .label { text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+
+    @media (max-width: 900px) {
+      .hero-content { flex-direction: column; }
+      .hero-actions { width: 100%; }
+      .btn-link { flex: 1 1 auto; justify-content: center; }
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 18px; }
+      .card { padding: 20px; }
+      .hero-text h1 { font-size: 26px; }
+      .button-row { flex-direction: column; }
+      .btn { width: 100%; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>TCP Configuration</h1>
-    <div style="margin-bottom: 20px;">
-      <a href="/">Back to Main</a>
+    <div class="card hero-card">
+      <div class="hero-content">
+        <div class="hero-text">
+          <p class="eyebrow">SignalK Server</p>
+          <h1>TCP Configuration</h1>
+          <p class="subtitle">Link this ESP32 SignalK instance to an upstream server or data bridge.</p>
+        </div>
+        <div class="hero-actions">
+          <a href="/" class="btn-link primary">Dashboard</a>
+          <a href="/admin" class="btn-link secondary">Admin Panel</a>
+        </div>
+      </div>
     </div>
 
-    <div class="info">
-      Configure connection to an external SignalK server via TCP. The server will receive and display data from the external source. Typical SignalK TCP port is 10110.
+    <div class="card subtle-card">
+      Configure a remote SignalK TCP feed. When enabled, this ESP32 will connect to the server and forward incoming data to all local clients.
     </div>
 
     <div class="card">
-      <form id="tcp-form">
-        <label for="host">Server Hostname or IP:</label>
-        <input type="text" id="host" name="host" placeholder="signalk.example.com or 192.168.1.100" required>
-
-        <label for="port">Port:</label>
-        <input type="number" id="port" name="port" value="10110" min="1" max="65535" required>
-
-        <div class="checkbox-wrapper">
-          <label style="display: inline-flex; align-items: center; cursor: pointer;">
-            <input type="checkbox" id="enabled" name="enabled">
-            <span>Enable TCP Connection</span>
-          </label>
+      <div class="card-header">
+        <div>
+          <h2>Remote Server</h2>
+          <p class="muted">Set hostname, port, and enable or disable the TCP bridge.</p>
+        </div>
+      </div>
+      <form id="tcp-form" class="form-grid">
+        <div class="input-field">
+          <label for="host">Server Hostname or IP</label>
+          <input type="text" id="host" name="host" placeholder="signalk.example.com or 192.168.1.100" required>
         </div>
 
-        <button type="submit">Save Configuration</button>
-        <button type="button" class="secondary" onclick="location.href='/'">Cancel</button>
-      </form>
+        <div class="input-field">
+          <label for="port">Port</label>
+          <input type="number" id="port" name="port" value="10110" min="1" max="65535" required>
+        </div>
 
-      <div id="status-display"></div>
+        <div class="checkbox-field">
+          <input type="checkbox" id="enabled" name="enabled">
+          <div>
+            <strong>Enable TCP connection</strong>
+            <p class="muted" style="margin-top:4px;">When enabled, the ESP32 will automatically maintain the TCP link.</p>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button type="submit" class="btn primary">Save Configuration</button>
+          <button type="button" class="btn secondary" onclick="location.href='/'">Cancel</button>
+        </div>
+        <div id="status-display"></div>
+      </form>
     </div>
 
     <div class="card">
-      <h2 style="font-size: 18px; margin-bottom: 12px;">Current Configuration</h2>
-      <p><strong>Host:</strong> <span id="current-host">-</span></p>
-      <p><strong>Port:</strong> <span id="current-port">-</span></p>
-      <p><strong>Enabled:</strong> <span id="current-enabled">-</span></p>
+      <div class="card-header">
+        <div>
+          <h2>Current Configuration</h2>
+          <p class="muted">Snapshot of the saved TCP settings.</p>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <p class="label">Host</p>
+          <strong id="current-host">-</strong>
+        </div>
+        <div class="summary-item">
+          <p class="label">Port</p>
+          <strong id="current-port">-</strong>
+        </div>
+        <div class="summary-item">
+          <p class="label">Enabled</p>
+          <strong id="current-enabled">-</strong>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -272,7 +447,7 @@ const char* HTML_CONFIG = R"html(
 
       const config = {
         host: document.getElementById('host').value,
-        port: parseInt(document.getElementById('port').value),
+        port: parseInt(document.getElementById('port').value, 10),
         enabled: document.getElementById('enabled').checked
       };
 
@@ -284,24 +459,21 @@ const char* HTML_CONFIG = R"html(
         });
 
         if (response.ok) {
-          document.getElementById('status-display').innerHTML =
-            '<div class="status connected">Configuration saved successfully!</div>';
+          document.getElementById('status-display').innerHTML = '<span class="status-pill connected">Configuration saved successfully</span>';
 
           document.getElementById('current-host').textContent = config.host || '(not set)';
           document.getElementById('current-port').textContent = config.port;
           document.getElementById('current-enabled').textContent = config.enabled ? 'Yes' : 'No';
-
-          setTimeout(() => {
-            document.getElementById('status-display').innerHTML = '';
-          }, 3000);
         } else {
-          document.getElementById('status-display').innerHTML =
-            '<div class="status disconnected">Failed to save configuration</div>';
+          document.getElementById('status-display').innerHTML = '<span class="status-pill disconnected">Failed to save configuration</span>';
         }
       } catch (err) {
-        document.getElementById('status-display').innerHTML =
-          '<div class="status disconnected">Error: ' + err.message + '</div>';
+        document.getElementById('status-display').innerHTML = '<span class="status-pill disconnected">Error: ' + err.message + '</span>';
       }
+
+      setTimeout(() => {
+        document.getElementById('status-display').innerHTML = '';
+      }, 4000);
     });
   </script>
 </body>
@@ -316,45 +488,116 @@ const char* HTML_ADMIN = R"html(
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Token Management - SignalK</title>
   <style>
+    :root {
+      --bg: #f5f7fb;
+      --card-bg: #ffffff;
+      --primary: #1f7afc;
+      --text: #1f2a37;
+      --muted: #5d6b82;
+      --border: #e4e7ec;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
-    .container { max-width: 900px; margin: 0 auto; }
-    .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    h1 { color: #333; margin-bottom: 10px; font-size: 24px; }
-    h2 { color: #666; margin-bottom: 15px; font-size: 18px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-    th { background: #f8f8f8; font-weight: 600; }
-    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-    .btn-approve { background: #4CAF50; color: white; }
-    .btn-deny { background: #f44336; color: white; }
-    .btn-revoke { background: #ff9800; color: white; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
+    .container { max-width: 1000px; margin: 0 auto; }
+
+    .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
+    .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
+    .hero-content { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .hero-text .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; opacity: 0.85; margin-bottom: 8px; }
+    .hero-text h1 { font-size: 30px; margin-bottom: 8px; }
+    .hero-text .subtitle { font-size: 15px; color: rgba(255,255,255,0.88); max-width: 520px; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+    .btn-link { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; border-radius: 999px; font-weight: 600; text-decoration: none; border: 1px solid rgba(255,255,255,0.5); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .btn-link.primary { background: #fff; color: #1f2a37; border-color: transparent; }
+    .btn-link.secondary { color: #fff; }
+    .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
+
+    .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .card-header span { color: var(--muted); font-size: 13px; }
+
+    .table-wrapper { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 520px; }
+    th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: top; }
+    th { text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; color: var(--muted); background: #f8fafc; }
+
+    .btn { border: none; border-radius: 10px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s ease; color: #fff; }
+    .btn-approve { background: #22c55e; }
+    .btn-deny { background: #ef4444; }
+    .btn-revoke { background: #f97316; }
     .btn:hover { opacity: 0.9; }
-    .status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-    .status-pending { background: #fff3cd; color: #856404; }
-    .status-approved { background: #d4edda; color: #155724; }
-    .empty { text-align: center; color: #999; padding: 20px; }
+
+    .empty-state { text-align: center; padding: 28px; border: 1px dashed #d5d9eb; border-radius: 14px; color: var(--muted); background: #fff; }
+
+    @media (max-width: 900px) {
+      .hero-content { flex-direction: column; }
+      .hero-actions { width: 100%; }
+      .btn-link { flex: 1 1 auto; justify-content: center; }
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 18px; }
+      .card { padding: 20px; }
+      .hero-text h1 { font-size: 26px; }
+      .table-wrapper { border: none; }
+      table, thead, tbody, th, td, tr { display: block; width: 100%; }
+      thead { display: none; }
+      tr { background: #fff; border: 1px solid var(--border); border-radius: 14px; margin-bottom: 14px; padding: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
+      td { border: none; padding: 8px 0; display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+      td::before { content: attr(data-label); font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+      td:last-child { border-bottom: none; }
+      .btn { width: 100%; justify-content: center; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="card">
-      <h1>Token Management</h1>
-      <p style="color: #666; margin-top: 10px;">Manage access tokens for SignalK clients</p>
+    <div class="card hero-card">
+      <div class="hero-content">
+        <div class="hero-text">
+          <p class="eyebrow">SignalK Admin</p>
+          <h1>Token Management</h1>
+          <p class="subtitle">Approve, deny, or revoke SignalK access tokens for connected devices.</p>
+        </div>
+        <div class="hero-actions">
+          <a href="/" class="btn-link primary">Dashboard</a>
+          <a href="/config" class="btn-link secondary">TCP Settings</a>
+        </div>
+      </div>
     </div>
 
     <div class="card">
-      <h2>Pending Requests</h2>
+      <div class="card-header">
+        <div>
+          <h2>Pending Requests</h2>
+          <p class="muted">Authorize new devices requesting access.</p>
+        </div>
+        <span>Auto-refreshes every 5 seconds</span>
+      </div>
       <div id="pending-requests"></div>
     </div>
 
     <div class="card">
-      <h2>Approved Tokens</h2>
+      <div class="card-header">
+        <div>
+          <h2>Approved Tokens</h2>
+          <p class="muted">Manage existing application tokens.</p>
+        </div>
+      </div>
       <div id="approved-tokens"></div>
     </div>
   </div>
 
   <script>
+    function wrapTable(content) {
+      return `<div class="table-wrapper"><table>${content}</table></div>`;
+    }
+
+    function renderEmpty(message) {
+      return `<div class="empty-state">${message}</div>`;
+    }
+
     function loadData() {
       fetch('/api/admin/tokens')
         .then(r => r.json())
@@ -367,42 +610,44 @@ const char* HTML_ADMIN = R"html(
     function renderPending(requests) {
       const el = document.getElementById('pending-requests');
       if (!requests || requests.length === 0) {
-        el.innerHTML = '<div class="empty">No pending requests</div>';
+        el.innerHTML = renderEmpty('No pending requests');
         return;
       }
 
-      el.innerHTML = '<table><tr><th>Client ID</th><th>Description</th><th>Permissions</th><th>Actions</th></tr>' +
-        requests.map(r => `
-          <tr>
-            <td><strong>${r.clientId}</strong></td>
-            <td>${r.description}</td>
-            <td>${r.permissions}</td>
-            <td>
-              <button class="btn btn-approve" onclick="approve('${r.requestId}')">Approve</button>
-              <button class="btn btn-deny" onclick="deny('${r.requestId}')">Deny</button>
-            </td>
-          </tr>
-        `).join('') + '</table>';
+      const rows = requests.map(r => `
+        <tr>
+          <td data-label="Client ID"><strong>${r.clientId}</strong></td>
+          <td data-label="Description">${r.description}</td>
+          <td data-label="Permissions">${r.permissions}</td>
+          <td data-label="Actions">
+            <button class="btn btn-approve" onclick="approve('${r.requestId}')">Approve</button>
+            <button class="btn btn-deny" onclick="deny('${r.requestId}')">Deny</button>
+          </td>
+        </tr>
+      `).join('');
+
+      el.innerHTML = wrapTable(`<thead><tr><th>Client ID</th><th>Description</th><th>Permissions</th><th>Actions</th></tr></thead><tbody>${rows}</tbody>`);
     }
 
     function renderApproved(tokens) {
       const el = document.getElementById('approved-tokens');
       if (!tokens || tokens.length === 0) {
-        el.innerHTML = '<div class="empty">No approved tokens</div>';
+        el.innerHTML = renderEmpty('No approved tokens');
         return;
       }
 
-      el.innerHTML = '<table><tr><th>Client ID</th><th>Description</th><th>Token</th><th>Actions</th></tr>' +
-        tokens.map(t => `
-          <tr>
-            <td><strong>${t.clientId}</strong></td>
-            <td>${t.description}</td>
-            <td><code style="font-size:11px">${t.token.substring(0,20)}...</code></td>
-            <td>
-              <button class="btn btn-revoke" onclick="revoke('${t.token}')">Revoke</button>
-            </td>
-          </tr>
-        `).join('') + '</table>';
+      const rows = tokens.map(t => `
+        <tr>
+          <td data-label="Client ID"><strong>${t.clientId}</strong></td>
+          <td data-label="Description">${t.description}</td>
+          <td data-label="Token"><code>${t.token}</code></td>
+          <td data-label="Actions">
+            <button class="btn btn-revoke" onclick="revoke('${t.token}')">Revoke</button>
+          </td>
+        </tr>
+      `).join('');
+
+      el.innerHTML = wrapTable(`<thead><tr><th>Client ID</th><th>Description</th><th>Token</th><th>Actions</th></tr></thead><tbody>${rows}</tbody>`);
     }
 
     function approve(requestId) {

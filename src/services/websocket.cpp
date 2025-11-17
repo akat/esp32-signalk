@@ -116,6 +116,13 @@ void broadcastDeltas() {
       val["value"] = kv.second.strValue;
     }
 
+    if (kv.second.units.length() > 0) {
+      val["units"] = kv.second.units;
+    }
+    if (kv.second.description.length() > 0) {
+      val["description"] = kv.second.description;
+    }
+
     // Store for next comparison
     lastSentValues[kv.first] = kv.second;
     kv.second.changed = false;
@@ -303,6 +310,13 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
         val["value"] = kv.second.numValue;
       } else {
         val["value"] = kv.second.strValue;
+      }
+
+      if (kv.second.units.length() > 0) {
+        val["units"] = kv.second.units;
+      }
+      if (kv.second.description.length() > 0) {
+        val["description"] = kv.second.description;
       }
     }
 
