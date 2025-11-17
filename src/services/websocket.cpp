@@ -190,9 +190,8 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
   // Handle incoming delta updates from clients (like 6pack app)
   if (doc.containsKey("updates")) {
     Serial.println("\n=== WS: Received delta update from client ===");
-    String debugMsg;
-    serializeJsonPretty(doc, debugMsg);
-    Serial.println(debugMsg);
+    serializeJsonPretty(doc, Serial);
+    Serial.println();
 
     // Note: WebSocket delta updates are currently open (no authentication required)
     // This is because the AsyncWebSocket library doesn't provide access to URL parameters
