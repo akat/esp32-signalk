@@ -7,15 +7,17 @@
 #define CAN_RX_PIN GPIO_NUM_26
 #define CAN_SE_PIN GPIO_NUM_23  // Silent/Enable pin
 
-// NMEA0183 Configuration
-#define NMEA_RX 16
-#define NMEA_TX 17
+// NMEA0183 Configuration (TTGO T-CAN485 default RS485 pins)
+#define NMEA_RX 21
+#define NMEA_TX 22
+#define NMEA_DE 17
+#define NMEA_DE_ENABLE 19
 #define NMEA_BAUD 4800
 
 // GPS Configuration
 #define GPS_BAUD 9600
-#define GPS_RX 16
-#define GPS_TX 17
+#define GPS_RX 25
+#define GPS_TX 18
 
 // WebSocket Configuration
 #define WS_DELTA_MIN_MS 100        // Minimum delta broadcast interval
