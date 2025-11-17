@@ -6,11 +6,16 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 
 ### Core Functionality
 - **SignalK HTTP/WebSocket Server** (Port 3000)
-- **NMEA 0183 TCP Server** (Port 10110) - NEW! Broadcast NMEA sentences to marine apps
+  - Full SignalK v1 protocol compliance
+  - **Bi-directional Delta Updates** - Clients can send and receive updates
+  - **Automatic Delta Broadcasting** - Server echoes client updates to all subscribers (required for SignalK protocol compliance)
+- **NMEA 0183 TCP Server** (Port 10110) - Broadcast NMEA sentences to marine apps
 - **WiFi Access Point & Client Mode** with WiFiManager
 - **Token-Based Authentication** with admin approval UI
 - **Push Notifications** via Expo (iOS/Android)
 - **Real-time Alarms**: Geofence, Wind, Depth
+  - **Smart Anchor Position Management** - Set position with automatic validation
+  - **Flexible Geofence Control** - Enable/disable monitoring independently
 - **mDNS Discovery** (signalk.local)
 - **DynDNS / DuckDNS Updater** configurable from the TCP/DynDNS UI for dynamic WAN addresses
 - **Web Dashboard** for monitoring and configuration
@@ -373,6 +378,12 @@ PUT  /signalk/v1/api/vessels/self/* (requires token)
 ```
 WS /signalk/v1/stream
 Subscribe to real-time SignalK deltas
+
+Features:
+- Bi-directional communication (send and receive)
+- Client-sent deltas are automatically broadcast to all subscribers
+- Full SignalK v1 delta protocol support
+- Supports anchor position updates from mobile apps
 ```
 
 ### Authentication
@@ -790,6 +801,14 @@ Uses `huge_app.csv` partition table:
 - **OTA Data**: 8KB (OTA metadata)
 - **No SPIFFS**: All flash space dedicated to application
 
+## Recent Updates
+
+### November 2025 - SignalK Protocol Compliance
+- ✅ **Fixed WebSocket Delta Broadcasting** - Server now properly echoes client-sent deltas to all subscribers (SignalK v1 requirement)
+- ✅ **Enhanced Anchor Management** - Improved logic for anchor position setting independent of geofence activation
+- ✅ **Mobile App Compatibility** - Full compatibility with 6pack and other SignalK-native mobile applications
+- ✅ **Simplified Geofence Logic** - Cleaner, more predictable behavior for anchor drop operations
+
 ## Future Enhancements
 
 - [x] RS485 NMEA 0183 support
@@ -797,7 +816,9 @@ Uses `huge_app.csv` partition table:
 - [x] GPS module integration
 - [x] I2C sensor support (BME280)
 - [x] Comprehensive documentation
-- [x] NMEA 0183 TCP server (port 10110) - **NEW!**
+- [x] NMEA 0183 TCP server (port 10110)
+- [x] Full SignalK v1 protocol compliance
+- [x] Bi-directional WebSocket delta support
 - [ ] SD card data logging
 - [ ] More NMEA 2000 PGNs (engine, rudder, AIS)
 - [ ] Compass/IMU support (heel, pitch, roll)
