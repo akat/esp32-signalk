@@ -12,6 +12,7 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 - **Push Notifications** via Expo (iOS/Android)
 - **Real-time Alarms**: Geofence, Wind, Depth
 - **mDNS Discovery** (signalk.local)
+- **DynDNS / DuckDNS Updater** configurable from the TCP/DynDNS UI for dynamic WAN addresses
 - **Web Dashboard** for monitoring and configuration
 
 ### Data Sources

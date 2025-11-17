@@ -3,6 +3,8 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include "../types.h"
+#include "../services/storage.h"
+#include "../services/dyndns.h"
 #include "security.h"
 
 // ====== FORWARD DECLARATIONS FOR GLOBALS ======
@@ -16,6 +18,7 @@ extern std::vector<String> expoTokens;
 extern String tcpServerHost;
 extern int tcpServerPort;
 extern bool tcpEnabled;
+extern DynDnsConfig dynDnsConfig;
 extern WiFiClient tcpClient;
 extern std::map<String, PathValue> lastSentValues;
 extern std::set<String> notifications;
@@ -31,6 +34,7 @@ extern void setPathValue(const String& path, const String& value, const String& 
 extern void setPathValueJson(const String& path, const String& jsonStr, const String& source, const String& units, const String& description);
 extern void saveApprovedTokens();
 extern bool addExpoToken(const String& token);
+extern void requestDynDnsUpdate();
 
 // ====== WEB UI CONSTANTS ======
 const char* HTML_UI = R"html(
@@ -317,6 +321,7 @@ const char* HTML_CONFIG = R"html(
     label { display: block; font-weight: 600; margin-bottom: 8px; color: var(--text); }
     input[type="text"], input[type="number"] { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; background: #f9fafb; transition: border 0.2s ease; }
     input[type="text"]:focus, input[type="number"]:focus { border-color: var(--primary); outline: none; background: #fff; }
+    select { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #f9fafb; font-size: 15px; }
 
     .form-grid { display: flex; flex-direction: column; gap: 18px; }
     .checkbox-field { display: flex; gap: 12px; align-items: flex-start; }
@@ -334,6 +339,7 @@ const char* HTML_CONFIG = R"html(
     .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
     .summary-item { background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 14px; padding: 14px; }
     .label { text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 
     @media (max-width: 900px) {
       .hero-content { flex-direction: column; }
@@ -426,12 +432,74 @@ const char* HTML_CONFIG = R"html(
         </div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2>Dynamic DNS (DynDNS)</h2>
+          <p class="muted">Keep your hostname in sync when your IP address changes.</p>
+        </div>
+        <span id="dyndns-status" class="status-pill disconnected">Disabled</span>
+      </div>
+      <form id="dyndns-form" class="form-grid">
+        <div class="input-field">
+          <label for="dyndns-provider">Provider</label>
+          <select id="dyndns-provider">
+            <option value="dyndns">DynDNS (members.dyndns.org)</option>
+            <option value="duckdns">DuckDNS</option>
+          </select>
+        </div>
+        <div class="input-field">
+          <label for="dyndns-hostname">Hostname</label>
+          <input type="text" id="dyndns-hostname" placeholder="yourhost.dyndns.org">
+        </div>
+
+        <div class="input-field provider-dyndns">
+          <label for="dyndns-username">Username</label>
+          <input type="text" id="dyndns-username" placeholder="DynDNS username">
+        </div>
+
+        <div class="input-field provider-dyndns">
+          <label for="dyndns-password">Password</label>
+          <input type="password" id="dyndns-password" placeholder="DynDNS password">
+        </div>
+
+        <div class="input-field provider-duckdns" style="display:none;">
+          <label for="dyndns-token">DuckDNS Token</label>
+          <input type="text" id="dyndns-token" placeholder="DuckDNS token">
+        </div>
+
+        <div class="checkbox-field">
+          <input type="checkbox" id="dyndns-enabled">
+          <div>
+            <strong>Enable DynDNS updates</strong>
+            <p class="muted" style="margin-top:4px;">Updates run every 15 minutes or whenever you press Update Now.</p>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button type="submit" class="btn primary">Save DynDNS</button>
+          <button type="button" class="btn secondary" id="dyndns-update-now">Update Now</button>
+        </div>
+        <div id="dyndns-status-display"></div>
+      </form>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <p class="label">Last Result</p>
+          <strong id="dyndns-last-result">-</strong>
+        </div>
+        <div class="summary-item">
+          <p class="label">Last Update</p>
+          <strong id="dyndns-last-updated">-</strong>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
-    fetch('/api/tcp/config')
-      .then(r => r.json())
-      .then(data => {
+    async function loadTcpConfig() {
+      try {
+        const data = await (await fetch('/api/tcp/config')).json();
         document.getElementById('host').value = data.host || '';
         document.getElementById('port').value = data.port || 10110;
         document.getElementById('enabled').checked = data.enabled || false;
@@ -439,8 +507,10 @@ const char* HTML_CONFIG = R"html(
         document.getElementById('current-host').textContent = data.host || '(not set)';
         document.getElementById('current-port').textContent = data.port || 10110;
         document.getElementById('current-enabled').textContent = data.enabled ? 'Yes' : 'No';
-      })
-      .catch(err => console.error('Failed to load config:', err));
+      } catch (err) {
+        console.error('Failed to load TCP config:', err);
+      }
+    }
 
     document.getElementById('tcp-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -475,6 +545,95 @@ const char* HTML_CONFIG = R"html(
         document.getElementById('status-display').innerHTML = '';
       }, 4000);
     });
+
+    function updateDynDnsStatus(data) {
+      const pill = document.getElementById('dyndns-status');
+      if (data.enabled) {
+        pill.textContent = 'Enabled';
+        pill.className = 'status-pill connected';
+      } else {
+        pill.textContent = 'Disabled';
+        pill.className = 'status-pill disconnected';
+      }
+
+      document.getElementById('dyndns-last-result').textContent = data.lastResult || 'No updates yet';
+      document.getElementById('dyndns-last-updated').textContent = data.lastUpdated || '-';
+    }
+
+    function updateProviderVisibility(provider) {
+      const dynFields = document.querySelectorAll('.provider-dyndns');
+      const duckFields = document.querySelectorAll('.provider-duckdns');
+      dynFields.forEach(el => el.style.display = provider === 'dyndns' ? 'block' : 'none');
+      duckFields.forEach(el => el.style.display = provider === 'duckdns' ? 'block' : 'none');
+    }
+
+    document.getElementById('dyndns-provider').addEventListener('change', (e) => {
+      updateProviderVisibility(e.target.value);
+    });
+
+    async function loadDynDnsConfig() {
+      try {
+        const data = await (await fetch('/api/dyndns/config')).json();
+        document.getElementById('dyndns-provider').value = data.provider || 'dyndns';
+        updateProviderVisibility(document.getElementById('dyndns-provider').value);
+        document.getElementById('dyndns-hostname').value = data.hostname || '';
+        document.getElementById('dyndns-username').value = data.username || '';
+        document.getElementById('dyndns-password').value = data.password || '';
+        document.getElementById('dyndns-token').value = data.token || '';
+        document.getElementById('dyndns-enabled').checked = data.enabled || false;
+        updateDynDnsStatus(data);
+      } catch (err) {
+        console.error('Failed to load DynDNS config:', err);
+      }
+    }
+
+    document.getElementById('dyndns-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        hostname: document.getElementById('dyndns-hostname').value,
+        provider: document.getElementById('dyndns-provider').value,
+        username: document.getElementById('dyndns-username').value,
+        password: document.getElementById('dyndns-password').value,
+        token: document.getElementById('dyndns-token').value,
+        enabled: document.getElementById('dyndns-enabled').checked
+      };
+
+      const statusDisplay = document.getElementById('dyndns-status-display');
+
+      try {
+        const response = await fetch('/api/dyndns/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          statusDisplay.innerHTML = '<span class="status-pill connected">DynDNS settings saved</span>';
+          loadDynDnsConfig();
+        } else {
+          statusDisplay.innerHTML = '<span class="status-pill disconnected">Failed to save DynDNS settings</span>';
+        }
+      } catch (err) {
+        statusDisplay.innerHTML = '<span class="status-pill disconnected">Error: ' + err.message + '</span>';
+      }
+
+      setTimeout(() => { statusDisplay.innerHTML = ''; }, 4000);
+    });
+
+    document.getElementById('dyndns-update-now').addEventListener('click', async () => {
+      const statusDisplay = document.getElementById('dyndns-status-display');
+      statusDisplay.innerHTML = '<span class="status-pill connected">Requesting update...</span>';
+      try {
+        await fetch('/api/dyndns/update', { method: 'POST' });
+        setTimeout(loadDynDnsConfig, 1500);
+      } catch (err) {
+        statusDisplay.innerHTML = '<span class="status-pill disconnected">Update failed: ' + err.message + '</span>';
+      }
+      setTimeout(() => { statusDisplay.innerHTML = ''; }, 4000);
+    });
+
+    loadTcpConfig();
+    loadDynDnsConfig();
   </script>
 </body>
 </html>
@@ -1495,4 +1654,64 @@ void handleSetTcpConfig(AsyncWebServerRequest* req, uint8_t *data, size_t len, s
   }
 
   req->send(200, "application/json", "{\"success\":true}");
+}
+
+// ====== DYNDNS CONFIGURATION HANDLERS ======
+
+void handleGetDynDnsConfig(AsyncWebServerRequest* req) {
+  DynamicJsonDocument doc(512);
+  doc["provider"] = dynDnsConfig.provider;
+  doc["hostname"] = dynDnsConfig.hostname;
+  doc["username"] = dynDnsConfig.username;
+  doc["password"] = dynDnsConfig.password;
+  doc["token"] = dynDnsConfig.token;
+  doc["enabled"] = dynDnsConfig.enabled;
+  doc["lastResult"] = dynDnsConfig.lastResult;
+  doc["lastUpdated"] = dynDnsConfig.lastUpdated;
+  doc["lastSuccess"] = dynDnsConfig.lastSuccess;
+
+  String output;
+  serializeJson(doc, output);
+  req->send(200, "application/json", output);
+}
+
+void handleSetDynDnsConfig(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total) {
+  if (index + len != total) {
+    return;
+  }
+
+  DynamicJsonDocument doc(512);
+  DeserializationError error = deserializeJson(doc, data, len);
+
+  if (error) {
+    req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  DynDnsConfig newConfig = dynDnsConfig;
+  newConfig.provider = doc["provider"] | dynDnsConfig.provider;
+  if (newConfig.provider != "duckdns") {
+    newConfig.provider = "dyndns";
+  }
+  newConfig.hostname = doc["hostname"] | "";
+  newConfig.username = doc["username"] | "";
+  newConfig.password = doc["password"] | "";
+  newConfig.token = doc["token"] | "";
+  newConfig.enabled = doc["enabled"] | false;
+
+  saveDynDnsConfig(newConfig);
+  requestDynDnsUpdate();
+
+  req->send(200, "application/json", "{\"success\":true}");
+}
+
+void handleTriggerDynDnsUpdate(AsyncWebServerRequest* req) {
+  requestDynDnsUpdate();
+  DynamicJsonDocument doc(256);
+  doc["success"] = true;
+  doc["message"] = "DynDNS update scheduled";
+
+  String output;
+  serializeJson(doc, output);
+  req->send(200, "application/json", output);
 }

@@ -62,6 +62,7 @@
 #include "services/alarms.h"
 #include "services/websocket.h"
 #include "services/nmea0183_tcp.h"
+#include "services/dyndns.h"
 
 // ====== HARDWARE MODULES ======
 #include "hardware/nmea0183.h"
@@ -110,6 +111,7 @@ GPSData gpsData;
 GeofenceConfig geofence;
 DepthAlarmConfig depthAlarm;
 WindAlarmConfig windAlarm;
+DynDnsConfig dynDnsConfig;
 
 // TCP Client for external SignalK server
 WiFiClient tcpClient;
@@ -390,6 +392,7 @@ void setup() {
 
   // Load TCP configuration
   loadTcpConfig();
+  loadDynDnsConfig();
 
   // Start WiFi in AP+STA mode (both Access Point and Station)
   // This keeps the AP running even when connected to another WiFi network
@@ -464,6 +467,7 @@ void setup() {
 
   // Initialize NMEA 0183 TCP Server (port 10110)
   initNMEA0183Server();
+  initDynDnsService();
 
   // HTTP GET handler for /signalk/v1/stream - Token validation for SensESP
   // IMPORTANT: This MUST be registered BEFORE the WebSocket handler!
@@ -733,6 +737,7 @@ void loop() {
   // TCP client connection and data processing
   connectToTcpServer();
   processTcpData();
+  processDynDnsService();
 
   // Broadcast WebSocket deltas
   if (ws.count() > 0) {

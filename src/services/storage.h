@@ -20,6 +20,7 @@ extern std::vector<String> expoTokens;
 extern String tcpServerHost;
 extern int tcpServerPort;
 extern bool tcpEnabled;
+extern DynDnsConfig dynDnsConfig;
 
 // Token management functions
 void saveApprovedTokens();
@@ -34,5 +35,9 @@ bool addExpoToken(const String& token);
 // TCP configuration
 void loadTcpConfig();
 void saveTcpConfig(String host, int port, bool enabled);
+
+// Dynamic DNS configuration
+void loadDynDnsConfig();
+void saveDynDnsConfig(const DynDnsConfig& config);
 
 #endif // SERVICES_STORAGE_H

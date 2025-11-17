@@ -67,6 +67,12 @@ void setupRoutes(AsyncWebServer& server) {
   server.on("/api/tcp/config", HTTP_POST,
     [](AsyncWebServerRequest* req) {}, NULL, handleSetTcpConfig);
 
+  // DynDNS Configuration API
+  server.on("/api/dyndns/config", HTTP_GET, handleGetDynDnsConfig);
+  server.on("/api/dyndns/config", HTTP_POST,
+    [](AsyncWebServerRequest* req) {}, NULL, handleSetDynDnsConfig);
+  server.on("/api/dyndns/update", HTTP_POST, handleTriggerDynDnsUpdate);
+
   // Expo Push Notification API
   server.on("/plugins/signalk-node-red/redApi/register-expo-token", HTTP_POST,
     [](AsyncWebServerRequest* req) {}, NULL, handleRegisterExpoToken);

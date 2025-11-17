@@ -104,6 +104,20 @@ struct WindAlarmConfig {
   uint32_t lastSampleTime = 0;
 };
 
+// ====== DYNAMIC DNS CONFIGURATION ======
+struct DynDnsConfig {
+  bool enabled = false;
+  String provider = "dyndns"; // "dyndns" or "duckdns"
+  String hostname;
+  String username;
+  String password;
+  String token;
+  String lastResult;
+  String lastUpdated;
+  bool lastSuccess = false;
+  unsigned long lastUpdateMs = 0;
+};
+
 // ====== TOKEN STORAGE ======
 struct ApprovedToken {
   String token;

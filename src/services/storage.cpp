@@ -1,5 +1,7 @@
 #include "storage.h"
 
+extern DynDnsConfig dynDnsConfig;
+
 // Token storage functions
 void saveApprovedTokens() {
   prefs.begin("signalk", false);
@@ -116,4 +118,40 @@ void saveTcpConfig(String host, int port, bool enabled) {
   Serial.println("Port: " + String(port));
   Serial.println("Enabled: " + String(enabled ? "Yes" : "No"));
   Serial.println("===============================\n");
+}
+
+void loadDynDnsConfig() {
+  prefs.begin("signalk", false);
+  dynDnsConfig.provider = prefs.getString("dyndns_provider", "dyndns");
+  if (dynDnsConfig.provider != "duckdns") {
+    dynDnsConfig.provider = "dyndns";
+  }
+  dynDnsConfig.hostname = prefs.getString("dyndns_host", "");
+  dynDnsConfig.username = prefs.getString("dyndns_user", "");
+  dynDnsConfig.password = prefs.getString("dyndns_pass", "");
+  dynDnsConfig.token = prefs.getString("dyndns_token", "");
+  dynDnsConfig.enabled = prefs.getBool("dyndns_enabled", false);
+  prefs.end();
+
+  dynDnsConfig.lastResult = dynDnsConfig.enabled ? "DynDNS ready" : "DynDNS disabled";
+  dynDnsConfig.lastUpdated = "";
+  dynDnsConfig.lastSuccess = false;
+  dynDnsConfig.lastUpdateMs = 0;
+}
+
+void saveDynDnsConfig(const DynDnsConfig& config) {
+  prefs.begin("signalk", false);
+  prefs.putString("dyndns_provider", config.provider);
+  prefs.putString("dyndns_host", config.hostname);
+  prefs.putString("dyndns_user", config.username);
+  prefs.putString("dyndns_pass", config.password);
+  prefs.putString("dyndns_token", config.token);
+  prefs.putBool("dyndns_enabled", config.enabled);
+  prefs.end();
+
+  dynDnsConfig = config;
+  dynDnsConfig.lastResult = config.enabled ? "Pending update" : "DynDNS disabled";
+  dynDnsConfig.lastUpdated = "";
+  dynDnsConfig.lastSuccess = false;
+  dynDnsConfig.lastUpdateMs = 0;
 }

@@ -69,6 +69,15 @@ void handleGetTcpConfig(AsyncWebServerRequest* req);
 // POST /api/tcp/config - Set TCP configuration
 void handleSetTcpConfig(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total);
 
+// GET /api/dyndns/config - Get Dynamic DNS configuration
+void handleGetDynDnsConfig(AsyncWebServerRequest* req);
+
+// POST /api/dyndns/config - Update Dynamic DNS configuration
+void handleSetDynDnsConfig(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total);
+
+// POST /api/dyndns/update - Trigger immediate update
+void handleTriggerDynDnsUpdate(AsyncWebServerRequest* req);
+
 // ====== PUSH NOTIFICATION HANDLERS ======
 
 // POST /plugins/signalk-node-red/redApi/register-expo-token - Register Expo push token
