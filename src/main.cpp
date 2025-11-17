@@ -121,15 +121,23 @@ uint32_t tcpConnectedTime = 0;
 String tcpBuffer = "";
 TcpClientState tcpState = TCP_DISCONNECTED;
 
-// TCP Server for receiving NMEA data (for testing/mocking)
-WiFiServer nmeaTcpServer(10110);
-WiFiClient nmeaTcpClient;
-String nmeaTcpBuffer = "";
-uint32_t nmeaLastActivity = 0;
+// Central handler to keep NMEA inputs consistent across all sources
+void handleNmeaSentence(const String& sentence, const char* sourceTag) {
+  if (sentence.length() < 7 || sentence[0] != '$') {
+    return;
+  }
 
-// Rate limiting for NMEA sentences
-uint32_t sentenceCount = 0;
-uint32_t sentenceWindowStart = 0;
+  if (sourceTag != nullptr) {
+    Serial.printf("NMEA [%s]: %s\n", sourceTag, sentence.c_str());
+  }
+
+  parseNMEASentence(sentence);
+
+  // Re-broadcast to TCP clients so external tools see the same stream
+  String broadcastSentence = sentence;
+  broadcastSentence += "\r\n";
+  broadcastNMEA0183(broadcastSentence);
+}
 
 // Serial port buffers
 String gpsBuffer = "";
@@ -216,16 +224,16 @@ void processTcpData() {
     char c = tcpClient.read();
 
     // NMEA sentences end with newline
-    if (c == '\n' || c == '\r') {
-      if (tcpBuffer.length() > 0) {
-        if (tcpBuffer[0] == '$') {
-          // This is an NMEA sentence - parse it
-          parseNMEASentence(tcpBuffer);
-        } else {
-          // Non-NMEA data - just log it for debugging
-          Serial.println("TCP Data (non-NMEA): " + tcpBuffer);
+      if (c == '\n' || c == '\r') {
+        if (tcpBuffer.length() > 0) {
+          if (tcpBuffer[0] == '$') {
+            // This is an NMEA sentence - parse it
+            handleNmeaSentence(tcpBuffer, nullptr);
+          } else {
+            // Non-NMEA data - just log it for debugging
+            Serial.println("TCP Data (non-NMEA): " + tcpBuffer);
+          }
         }
-      }
       tcpBuffer = "";
     } else if (c >= 32 && c <= 126) {
       // Only accept printable ASCII characters
@@ -244,79 +252,6 @@ void processTcpData() {
     Serial.println("TCP: Connection lost");
     tcpBuffer = "";
     tcpState = TCP_DISCONNECTED;
-  }
-}
-
-void processNmeaTcpServer() {
-  // Check for new client connections
-  if (!nmeaTcpClient || !nmeaTcpClient.connected()) {
-    // Clean up existing client first
-    if (nmeaTcpClient) {
-      nmeaTcpClient.stop();
-    }
-
-    nmeaTcpClient = nmeaTcpServer.available();
-    if (nmeaTcpClient) {
-      Serial.println("NMEA TCP Server: New client connected from " + nmeaTcpClient.remoteIP().toString());
-      nmeaTcpBuffer = "";
-      nmeaLastActivity = millis();
-      sentenceCount = 0;
-      sentenceWindowStart = millis();
-    }
-  }
-
-  // Process data from connected client
-  if (nmeaTcpClient && nmeaTcpClient.connected()) {
-    // Check for rate limiting window reset
-    uint32_t now = millis();
-    if (now - sentenceWindowStart > 1000) {
-      sentenceCount = 0;
-      sentenceWindowStart = now;
-    }
-
-    // Check for client timeout
-    if (nmeaTcpClient.available()) {
-      nmeaLastActivity = now;
-    } else if (now - nmeaLastActivity > NMEA_CLIENT_TIMEOUT) {
-      Serial.println("NMEA TCP Server: Client timeout, disconnecting");
-      nmeaTcpClient.stop();
-      nmeaTcpBuffer = "";
-      return;
-    }
-
-    while (nmeaTcpClient.available()) {
-      char c = nmeaTcpClient.read();
-
-      // NMEA sentences end with newline
-      if (c == '\n' || c == '\r') {
-        if (nmeaTcpBuffer.length() > 6 && nmeaTcpBuffer[0] == '$') {
-          // Rate limiting check
-          if (sentenceCount >= MAX_SENTENCES_PER_SECOND) {
-            Serial.println("NMEA TCP Server: Rate limit exceeded, disconnecting client");
-            nmeaTcpClient.stop();
-            nmeaTcpBuffer = "";
-            return;
-          }
-
-          // This is an NMEA sentence - parse it
-          Serial.println("NMEA TCP Server: " + nmeaTcpBuffer);
-          parseNMEASentence(nmeaTcpBuffer);
-          sentenceCount++;
-
-          // Allow other tasks to run without blocking
-          yield();
-        }
-        nmeaTcpBuffer = "";
-      } else if (c >= 32 && c <= 126) {
-        if (nmeaTcpBuffer.length() < 120) {
-          nmeaTcpBuffer += c;
-        } else {
-          // Buffer overflow protection
-          nmeaTcpBuffer = "";
-          Serial.println("NMEA TCP Server: Buffer overflow, resetting");
-        }
-      }
-    }
   }
 }
 
@@ -566,11 +501,6 @@ void setup() {
   server.addHandler(&ws);
   Serial.println("WebSocket setup complete");
 
-  // Start NMEA TCP server for receiving mock data
-  Serial.println("Starting NMEA TCP server...");
-  nmeaTcpServer.begin();
-  Serial.println("NMEA TCP Server started on port 10110");
-
   // Setup all HTTP routes via the routes module
   Serial.println("Setting up HTTP routes...");
   setupRoutes(server);
@@ -761,11 +691,11 @@ void loop() {
   while (Serial1.available()) {
     char c = Serial1.read();
 
-    if (c == '\n' || c == '\r') {
-      if (nmeaBuffer.length() > 6 && nmeaBuffer[0] == '$') {
-        parseNMEASentence(nmeaBuffer);
-      }
-      nmeaBuffer = "";
+      if (c == '\n' || c == '\r') {
+        if (nmeaBuffer.length() > 6 && nmeaBuffer[0] == '$') {
+          handleNmeaSentence(nmeaBuffer, nullptr);
+        }
+        nmeaBuffer = "";
     } else if (c >= 32 && c <= 126) {
       if (nmeaBuffer.length() < 120) {
         nmeaBuffer += c;
@@ -777,11 +707,11 @@ void loop() {
   while (Serial2.available()) {
     char c = Serial2.read();
 
-    if (c == '\n' || c == '\r') {
-      if (gpsBuffer.length() > 6 && gpsBuffer[0] == '$') {
-        parseNMEASentence(gpsBuffer);  // GPS modules send NMEA 0183
-      }
-      gpsBuffer = "";
+      if (c == '\n' || c == '\r') {
+        if (gpsBuffer.length() > 6 && gpsBuffer[0] == '$') {
+          handleNmeaSentence(gpsBuffer, nullptr);  // GPS modules send NMEA 0183
+        }
+        gpsBuffer = "";
     } else if (c >= 32 && c <= 126) {
       if (gpsBuffer.length() < 120) {
         gpsBuffer += c;
@@ -803,9 +733,6 @@ void loop() {
   // TCP client connection and data processing
   connectToTcpServer();
   processTcpData();
-
-  // NMEA TCP server for receiving mock data
-  processNmeaTcpServer();
 
   // Broadcast WebSocket deltas
   if (ws.count() > 0) {

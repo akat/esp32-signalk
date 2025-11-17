@@ -1,4 +1,8 @@
 #include "nmea0183_tcp.h"
+#include "../config.h"
+
+// Forward declaration for NMEA handler defined in main.cpp
+extern void handleNmeaSentence(const String& sentence, const char* sourceTag);
 
 // TCP Server instance
 static WiFiServer nmeaServer(NMEA_TCP_PORT);
@@ -8,10 +12,15 @@ struct NMEAClient {
   WiFiClient client;
   uint32_t lastActivity;
   bool active;
+  bool allowSend;
+  uint16_t sentenceCount;
+  uint32_t sentenceWindowStart;
+  String rxBuffer;
 };
 
 static NMEAClient clients[MAX_NMEA_CLIENTS];
 static bool serverStarted = false;
+static const char* INPUT_SOURCE_TAG = "NMEA TCP Input";
 
 // Initialize NMEA 0183 TCP server
 void initNMEA0183Server() {
@@ -21,6 +30,10 @@ void initNMEA0183Server() {
   for (int i = 0; i < MAX_NMEA_CLIENTS; i++) {
     clients[i].active = false;
     clients[i].lastActivity = 0;
+    clients[i].allowSend = true;
+    clients[i].sentenceCount = 0;
+    clients[i].sentenceWindowStart = 0;
+    clients[i].rxBuffer = "";
   }
 
   // Start TCP server
@@ -58,6 +71,10 @@ void processNMEA0183Server() {
       clients[freeSlot].client.setNoDelay(true);
       clients[freeSlot].lastActivity = now;
       clients[freeSlot].active = true;
+      clients[freeSlot].allowSend = true;
+      clients[freeSlot].sentenceCount = 0;
+      clients[freeSlot].sentenceWindowStart = now;
+      clients[freeSlot].rxBuffer = "";
 
       Serial.printf("NMEA TCP: New client [%d] connected from %s\n",
                     freeSlot, newClient.remoteIP().toString().c_str());
@@ -80,20 +97,49 @@ void processNMEA0183Server() {
       continue;
     }
 
-    // Update activity if data available (even if we don't read it)
-    if (clients[i].client.available()) {
+    // Process inbound data (for mock feeds)
+    bool hadData = false;
+    while (clients[i].client.available()) {
+      hadData = true;
       clients[i].lastActivity = now;
-      // Flush incoming data - we only transmit, don't receive
-      while (clients[i].client.available()) {
-        clients[i].client.read();
+
+      char c = clients[i].client.read();
+      if (c == '\n' || c == '\r') {
+        if (clients[i].rxBuffer.length() > 6 && clients[i].rxBuffer[0] == '$') {
+          if (now - clients[i].sentenceWindowStart > 1000) {
+            clients[i].sentenceWindowStart = now;
+            clients[i].sentenceCount = 0;
+          }
+
+          if (clients[i].sentenceCount >= MAX_SENTENCES_PER_SECOND) {
+            Serial.printf("NMEA TCP: Client [%d] exceeded rate limit, disconnecting\n", i);
+            clients[i].client.stop();
+            clients[i].active = false;
+            clients[i].rxBuffer = "";
+            break;
+          }
+
+          clients[i].sentenceCount++;
+          clients[i].allowSend = false;  // Don't echo data back to this client
+          handleNmeaSentence(clients[i].rxBuffer, INPUT_SOURCE_TAG);
+          yield();
+        }
+        clients[i].rxBuffer = "";
+      } else if (c >= 32 && c <= 126) {
+        if (clients[i].rxBuffer.length() < 120) {
+          clients[i].rxBuffer += c;
+        } else {
+          clients[i].rxBuffer = "";
+          Serial.printf("NMEA TCP: Client [%d] payload overflow, resetting buffer\n", i);
+        }
       }
     }
 
-    // Check for timeout
-    if (now - clients[i].lastActivity > CLIENT_TIMEOUT_MS) {
+    if (!hadData && (now - clients[i].lastActivity > CLIENT_TIMEOUT_MS)) {
       Serial.printf("NMEA TCP: Client [%d] timeout, disconnecting\n", i);
       clients[i].client.stop();
       clients[i].active = false;
+      continue;
     }
   }
 }
@@ -106,7 +152,7 @@ void broadcastNMEA0183(const String& sentence) {
   int sentCount = 0;
 
   for (int i = 0; i < MAX_NMEA_CLIENTS; i++) {
-    if (!clients[i].active) continue;
+    if (!clients[i].active || !clients[i].allowSend) continue;
 
     if (clients[i].client.connected()) {
       // Try to send
@@ -159,6 +205,10 @@ void stopNMEA0183Server() {
       clients[i].client.stop();
       clients[i].active = false;
     }
+    clients[i].allowSend = true;
+    clients[i].sentenceCount = 0;
+    clients[i].sentenceWindowStart = 0;
+    clients[i].rxBuffer = "";
   }
 
   nmeaServer.stop();

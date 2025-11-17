@@ -3,6 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <cmath>
+#include <vector>
 
 // ====== EXTERN DECLARATIONS ======
 // These are defined in main.cpp
@@ -18,6 +19,44 @@ extern String iso8601Now();
 extern void setPathValue(const String& path, double value, const String& source, const String& units, const String& description);
 extern void setPathValue(const String& path, const String& value, const String& source, const String& units, const String& description);
 extern void setPathValueJson(const String& path, const String& jsonValue, const String& source, const String& units, const String& description);
+
+// Helper to match subscription patterns like "*", "navigation.*", "environment.wind.*"
+static bool matchesSubscriptionPattern(const String& pattern, const String& path) {
+  if (pattern == "*" || pattern.length() == 0) {
+    return true;
+  }
+
+  int starPos = pattern.indexOf('*');
+  if (starPos < 0) {
+    return pattern == path;
+  }
+
+  String prefix = pattern.substring(0, starPos);
+  String suffix = pattern.substring(starPos + 1);
+
+  if (!path.startsWith(prefix)) {
+    return false;
+  }
+
+  if (suffix.length() == 0) {
+    return true;
+  }
+
+  return path.endsWith(suffix);
+}
+
+static bool isPathSubscribed(const ClientSubscription& sub, const String& path) {
+  if (sub.paths.empty()) {
+    return false;
+  }
+
+  for (const auto& pattern : sub.paths) {
+    if (matchesSubscriptionPattern(pattern, path)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ====== WEBSOCKET DELTA BROADCAST ======
 void broadcastDeltas() {
@@ -54,6 +93,8 @@ void broadcastDeltas() {
   JsonArray values = update.createNestedArray("values");
 
   bool hasChanges = false;
+  std::vector<String> changedPaths;
+  changedPaths.reserve(dataStore.size());
 
   for (auto& kv : dataStore) {
     if (!kv.second.changed) continue;
@@ -79,6 +120,7 @@ void broadcastDeltas() {
     lastSentValues[kv.first] = kv.second;
     kv.second.changed = false;
     hasChanges = true;
+    changedPaths.push_back(kv.first);
   }
 
   if (!hasChanges) return;
@@ -109,7 +151,17 @@ void broadcastDeltas() {
       continue;
     }
 
-    client->text(output);
+    bool shouldSend = false;
+    for (const String& path : changedPaths) {
+      if (isPathSubscribed(it->second, path)) {
+        shouldSend = true;
+        break;
+      }
+    }
+
+    if (shouldSend) {
+      client->text(output);
+    }
     ++it;
   }
 }
@@ -245,15 +297,10 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     for (JsonVariant v : subArray) {
       JsonObject subObj = v.as<JsonObject>();
       String path = subObj["path"] | "*";
-
-      if (path == "*") {
-        // Subscribe to all
-        for (auto& kv : dataStore) {
-          sub.paths.insert(kv.first);
-        }
-      } else {
-        sub.paths.insert(path);
+      if (path.length() == 0) {
+        continue;
       }
+      sub.paths.insert(path);
     }
 
     sub.format = doc["format"] | "delta";
@@ -285,7 +332,7 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     // Send current values for subscribed paths
     for (auto& kv : dataStore) {
       // Check if this path is subscribed
-      if (sub.paths.count(kv.first) == 0 && sub.paths.count("*") == 0) {
+      if (!isPathSubscribed(sub, kv.first)) {
         continue;
       }
 

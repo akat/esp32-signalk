@@ -3,6 +3,7 @@
 #include "../utils/time_utils.h"
 #include "../utils/conversions.h"
 #include <ArduinoJson.h>
+#include <cstring>
 
 // Global data store - these are defined in main.cpp
 extern std::map<String, PathValue> dataStore;
@@ -12,8 +13,58 @@ extern std::map<String, String> notifications;
 // Forward declaration for updateGeofence (will be in services/alarms)
 extern void updateGeofence();
 
+static bool handleAnchorPartialUpdate(const String& path, bool isNumeric,
+                                      double numericValue, const String& strValue,
+                                      const String& source, const String& units,
+                                      const String& description) {
+  static const char* kAnchorPrefix = "navigation.anchor.akat.anchor.";
+  if (!path.startsWith(kAnchorPrefix)) {
+    return false;
+  }
+
+  String field = path.substring(strlen(kAnchorPrefix));
+  if (field.length() == 0) {
+    return false;
+  }
+
+  // Load existing anchor object if present
+  DynamicJsonDocument doc(1024);
+  auto existing = dataStore.find("navigation.anchor.akat");
+  if (existing != dataStore.end() && existing->second.isJson && existing->second.jsonValue.length() > 0) {
+    DeserializationError err = deserializeJson(doc, existing->second.jsonValue);
+    if (err) {
+      doc.clear();
+    }
+  }
+
+  JsonObject anchorObj;
+  if (doc.containsKey("anchor") && doc["anchor"].is<JsonObject>()) {
+    anchorObj = doc["anchor"].as<JsonObject>();
+  } else {
+    anchorObj = doc.createNestedObject("anchor");
+  }
+
+  if (isNumeric) {
+    anchorObj[field] = numericValue;
+  } else {
+    anchorObj[field] = strValue;
+  }
+
+  String json;
+  serializeJson(doc, json);
+
+  // Store the combined object back to navigation.anchor.akat
+  setPathValueJson("navigation.anchor.akat", json, source, units,
+                   description.length() > 0 ? description : "Anchor configuration");
+  return true;
+}
+
 void setPathValue(const String& path, double value, const String& source,
                   const String& units, const String& description) {
+  if (handleAnchorPartialUpdate(path, true, value, "", source, units, description)) {
+    return;
+  }
+
   PathValue& pv = dataStore[path];
   pv.numValue = value;
   pv.isNumeric = true;
@@ -28,6 +79,10 @@ void setPathValue(const String& path, double value, const String& source,
 
 void setPathValue(const String& path, const String& value, const String& source,
                   const String& units, const String& description) {
+  if (handleAnchorPartialUpdate(path, false, 0.0, value, source, units, description)) {
+    return;
+  }
+
   PathValue& pv = dataStore[path];
   pv.strValue = value;
   pv.isNumeric = false;

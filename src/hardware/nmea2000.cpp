@@ -1,5 +1,4 @@
 #include "nmea2000.h"
-#include <ArduinoJson.h>
 #include <NMEA2000.h>
 #include <N2kMessages.h>
 #include "../config.h"
@@ -31,6 +30,7 @@ extern void setPathValue(const String& path, double value, const String& source,
                         const String& unit, const String& description);
 extern void setPathValue(const String& path, const String& value, const String& source,
                         const String& unit, const String& description);
+extern void updateNavigationPosition(double lat, double lon, const String& source);
 extern void updateWindAlarm(double windSpeedMS);
 extern void updateDepthAlarm(double depth);
 extern double RadToDeg(double rad);
@@ -47,12 +47,7 @@ void HandleN2kPosition(const tN2kMsg &N2kMsg) {
     gpsData.lon = longitude;
     gpsData.timestamp = iso8601Now();
 
-    DynamicJsonDocument posDoc(128);
-    posDoc["latitude"] = latitude;
-    posDoc["longitude"] = longitude;
-    String posJson;
-    serializeJson(posDoc, posJson);
-    setPathValue("navigation.position", posJson, "nmea2000.can", "", "Vessel position");
+    updateNavigationPosition(latitude, longitude, "nmea2000.can");
 
     Serial.printf("N2K Position: %.6f, %.6f\n", latitude, longitude);
 
@@ -110,7 +105,14 @@ void HandleN2kWindSpeed(const tN2kMsg &N2kMsg) {
   tN2kWindReference WindReference;
 
   if (ParseN2kPGN130306(N2kMsg, SID, WindSpeed, WindAngle, WindReference)) {
-    if (WindReference == N2kWind_True_water || WindReference == N2kWind_True_North) {
+    if (WindReference == N2kWind_Apparent) {
+      if (!N2kIsNA(WindSpeed)) {
+        setPathValue("environment.wind.speedApparent", WindSpeed, "nmea2000.can", "m/s", "Apparent wind speed");
+      }
+      if (!N2kIsNA(WindAngle)) {
+        setPathValue("environment.wind.angleApparent", WindAngle, "nmea2000.can", "rad", "Apparent wind angle");
+      }
+    } else if (WindReference == N2kWind_True_water || WindReference == N2kWind_True_North) {
       if (!N2kIsNA(WindSpeed)) {
         setPathValue("environment.wind.speedTrue", WindSpeed, "nmea2000.can", "m/s", "True wind speed");
         updateWindAlarm(WindSpeed);
@@ -118,14 +120,18 @@ void HandleN2kWindSpeed(const tN2kMsg &N2kMsg) {
       if (!N2kIsNA(WindAngle)) {
         setPathValue("environment.wind.angleTrueWater", WindAngle, "nmea2000.can", "rad", "True wind angle");
       }
-      Serial.printf("N2K Wind: %.1f m/s at %.0f deg\n", WindSpeed, RadToDeg(WindAngle));
+    }
 
-      // Broadcast NMEA 0183 MWV sentence via TCP
+    if (!N2kIsNA(WindSpeed) && !N2kIsNA(WindAngle)) {
+      Serial.printf("N2K Wind (%s): %.1f m/s at %.0f deg\n",
+                    WindReference == N2kWind_Apparent ? "App" : "True",
+                    WindSpeed, RadToDeg(WindAngle));
       static uint32_t lastMWV = 0;
       uint32_t now = millis();
-      if (!N2kIsNA(WindSpeed) && !N2kIsNA(WindAngle) && (now - lastMWV > 200)) {  // Send MWV at 5Hz
+      if (now - lastMWV > 200) {
         lastMWV = now;
-        String mwv = convertToMWV(WindAngle, WindSpeed, 'T');  // T = True wind
+        char ref = (WindReference == N2kWind_Apparent) ? 'R' : 'T';
+        String mwv = convertToMWV(WindAngle, WindSpeed, ref);
         broadcastNMEA0183(mwv);
       }
     }
