@@ -22,6 +22,13 @@ void setPathValueJson(const String& path, const String& jsonValue, const String&
 
 void updateNavigationPosition(double lat, double lon, const String& source = "nmea0183.GPS");
 
+bool handleAnchorPartialUpdate(const String& path, bool isNumeric, double numericValue,
+                               const String& strValue, const String& source,
+                               const String& units, const String& description);
+
+// Flush pending anchor persistence (call from loop)
+void flushAnchorPersist();
+
 // Notification operations
 void setNotification(const String& path, const String& state, const String& message);
 void clearNotification(const String& path);

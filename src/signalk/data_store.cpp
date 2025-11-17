@@ -17,10 +17,16 @@ extern GeofenceConfig geofence;
 extern DepthAlarmConfig depthAlarm;
 extern WindAlarmConfig windAlarm;
 
-static bool handleAnchorPartialUpdate(const String& path, bool isNumeric,
-                                      double numericValue, const String& strValue,
-                                      const String& source, const String& units,
-                                      const String& description) {
+bool handleAnchorPartialUpdate(const String& path, bool isNumeric,
+                               double numericValue, const String& strValue,
+                               const String& source, const String& units,
+                               const String& description);
+static void queueAnchorPersist(const String& json);
+
+bool handleAnchorPartialUpdate(const String& path, bool isNumeric,
+                               double numericValue, const String& strValue,
+                               const String& source, const String& units,
+                               const String& description) {
   static const char* kAnchorPrefix = "navigation.anchor.akat.anchor.";
   if (!path.startsWith(kAnchorPrefix)) {
     return false;
@@ -57,7 +63,6 @@ static bool handleAnchorPartialUpdate(const String& path, bool isNumeric,
   String json;
   serializeJson(doc, json);
 
-  // Store the combined object back to navigation.anchor.akat
   setPathValueJson("navigation.anchor.akat", json, source, units,
                    description.length() > 0 ? description : "Anchor configuration");
   return true;
@@ -243,6 +248,52 @@ void setPathValue(const String& path, const String& value, const String& source,
   pv.changed = true;
 }
 
+static bool anchorPersistPending = false;
+static String pendingAnchorJson = "";
+static uint32_t pendingAnchorTimestamp = 0;
+static const uint32_t kAnchorPersistDelayMs = 250;
+
+static void queueAnchorPersist(const String& json) {
+  pendingAnchorJson = json;
+  anchorPersistPending = true;
+  pendingAnchorTimestamp = millis();
+}
+
+void flushAnchorPersist() {
+  if (!anchorPersistPending) {
+    return;
+  }
+
+  if (millis() - pendingAnchorTimestamp < kAnchorPersistDelayMs) {
+    return;  // wait a little to batch successive updates
+  }
+
+  anchorPersistPending = false;
+
+  if (pendingAnchorJson.length() == 0) {
+    return;
+  }
+
+  Serial.printf("Attempting to persist %d bytes to flash\n", pendingAnchorJson.length());
+
+  if (pendingAnchorJson.length() > 1900) {
+    Serial.println("WARNING: JSON too large for NVS, truncating may occur");
+  }
+
+  prefs.begin("signalk", false);
+  size_t written = prefs.putString("anchor.akat", pendingAnchorJson);
+
+  // Verify it was written
+  String readBack = prefs.getString("anchor.akat", "");
+  prefs.end();
+
+  if (written > 0 && readBack == pendingAnchorJson) {
+    Serial.printf("SUCCESS: Persisted %d bytes to flash and verified\n", written);
+  } else {
+    Serial.printf("ERROR: Failed to persist (wrote %d bytes, readback length %d)\n", written, readBack.length());
+  }
+}
+
 void setPathValueJson(const String& path, const String& jsonValue, const String& source,
                       const String& units, const String& description) {
   String normalized = jsonValue;
@@ -262,24 +313,7 @@ void setPathValueJson(const String& path, const String& jsonValue, const String&
 
   // Persist important configuration paths to flash
   if (path == "navigation.anchor.akat") {
-    Serial.printf("Attempting to persist %d bytes to flash\n", normalized.length());
-
-    if (normalized.length() > 1900) {
-      Serial.println("WARNING: JSON too large for NVS, truncating may occur");
-    }
-
-    prefs.begin("signalk", false);
-    size_t written = prefs.putString("anchor.akat", normalized);
-
-    // Verify it was written
-    String readBack = prefs.getString("anchor.akat", "");
-    prefs.end();
-
-    if (written > 0 && readBack == normalized) {
-      Serial.printf("SUCCESS: Persisted %d bytes to flash and verified\n", written);
-    } else {
-      Serial.printf("ERROR: Failed to persist (wrote %d bytes, readback length %d)\n", written, readBack.length());
-    }
+    queueAnchorPersist(normalized);
   }
 }
 

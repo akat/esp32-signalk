@@ -19,6 +19,9 @@ extern String iso8601Now();
 extern void setPathValue(const String& path, double value, const String& source, const String& units, const String& description);
 extern void setPathValue(const String& path, const String& value, const String& source, const String& units, const String& description);
 extern void setPathValueJson(const String& path, const String& jsonValue, const String& source, const String& units, const String& description);
+extern bool handleAnchorPartialUpdate(const String& path, bool isNumeric, double numericValue,
+                                      const String& strValue, const String& source,
+                                      const String& units, const String& description);
 
 // Helper to match subscription patterns like "*", "navigation.*", "environment.wind.*"
 static bool matchesSubscriptionPattern(const String& pattern, const String& path) {
@@ -226,6 +229,23 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
 
         JsonVariant value = valueObj["value"];
         String source = update["source"] | "app";
+
+        // Special handling: inline anchor lat/lon updates should also update the canonical anchor object
+        if (fullPath.startsWith("navigation.anchor.akat.anchor.")) {
+          if (value.is<JsonObject>() || value.is<JsonArray>()) {
+            String jsonStr;
+            serializeJson(value, jsonStr);
+            handleAnchorPartialUpdate(fullPath, false, 0.0, jsonStr, source, "", "WebSocket update");
+            Serial.printf("WS: Inline anchor JSON update for %s\n", fullPath.c_str());
+          } else if (value.is<double>() || value.is<int>() || value.is<float>()) {
+            handleAnchorPartialUpdate(fullPath, true, value.as<double>(), "", source, "", "WebSocket update");
+          } else if (value.is<bool>()) {
+            handleAnchorPartialUpdate(fullPath, true, value.as<bool>() ? 1.0 : 0.0, "", source, "", "WebSocket update");
+          } else if (value.is<const char*>()) {
+            handleAnchorPartialUpdate(fullPath, false, 0.0, String(value.as<const char*>()), source, "", "WebSocket update");
+          }
+          // Fall through so individual anchor.* paths still get stored/broadcast
+        }
 
         // Store the value based on type
         if (value.is<JsonObject>() || value.is<JsonArray>()) {

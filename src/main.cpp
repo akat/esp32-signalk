@@ -731,6 +731,9 @@ void loop() {
   // Read I2C sensors
   readI2CSensors();
 
+  // Flush anchor persistence (ensures NVS writes happen on main task)
+  flushAnchorPersist();
+
   // Process NMEA 0183 TCP Server (port 10110)
   processNMEA0183Server();
 
