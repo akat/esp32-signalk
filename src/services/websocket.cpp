@@ -263,6 +263,14 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
         }
       }
     }
+
+    // Broadcast the received delta to all clients (SignalK protocol requirement)
+    // This allows clients to see updates they sent, which many apps rely on for confirmation
+    Serial.println("WS: Broadcasting received delta to all connected clients");
+    String deltaJson;
+    serializeJson(doc, deltaJson);
+    ws.textAll(deltaJson);
+
     return;
   }
 

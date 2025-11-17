@@ -92,6 +92,12 @@ static String buildCanonicalAnchorConfig() {
 }
 
 static String normalizeAnchorConfig(const String& jsonValue) {
+  Serial.println("======================================");
+  Serial.println("normalizeAnchorConfig() called");
+  Serial.printf("Input JSON: %s\n", jsonValue.c_str());
+  Serial.printf("Current geofence.enabled: %s\n", geofence.enabled ? "TRUE" : "FALSE");
+  Serial.println("======================================");
+
   DynamicJsonDocument incoming(1024);
   DeserializationError err = deserializeJson(incoming, jsonValue);
   if (err || !incoming.is<JsonObject>()) {
@@ -198,18 +204,43 @@ static String normalizeAnchorConfig(const String& jsonValue) {
   }
 
   if (anchorEnabledProvided) {
-    bool geofenceIntent = anchorPosChanged || radiusChanged || (!depthChanged && !windChanged);
-    if (geofenceIntent) {
-      if (geofence.enabled != newAnchorEnabled) {
-        geofence.enabled = newAnchorEnabled;
-        Serial.printf("Anchor config: Geofence enabled -> %s\n", geofence.enabled ? "true" : "false");
+    // Debug logging to diagnose anchor drop issues
+    Serial.printf("Anchor config: Change flags - pos:%d rad:%d depth:%d wind:%d\n",
+                  anchorPosChanged, radiusChanged, depthChanged, windChanged);
+    Serial.printf("Anchor config: Requested enabled=%s, current=%s, hasValidPosition=%d\n",
+                  newAnchorEnabled ? "true" : "false",
+                  geofence.enabled ? "true" : "false",
+                  !isnan(geofence.anchorLat) && !isnan(geofence.anchorLon));
+
+    // SIMPLIFIED LOGIC based on best practices:
+    // Rule 1: ALWAYS allow enabling geofence if we have a valid anchor position
+    // Rule 2: ALWAYS allow disabling geofence (weigh anchor)
+    // Rule 3: Ignore enable request if no valid position (safety check)
+
+    bool hasValidPosition = !isnan(geofence.anchorLat) && !isnan(geofence.anchorLon);
+
+    if (newAnchorEnabled) {
+      // User wants to ENABLE geofence (drop/monitor anchor)
+      if (hasValidPosition) {
+        geofence.enabled = true;
+        Serial.println("Anchor config: Geofence ENABLED (valid position exists)");
+      } else {
+        Serial.println("Anchor config: Ignoring enable request - NO VALID POSITION");
       }
     } else {
-      Serial.println("Anchor config: Ignoring geofence.enabled because depth/wind changed");
+      // User wants to DISABLE geofence (weigh anchor)
+      geofence.enabled = false;
+      Serial.println("Anchor config: Geofence DISABLED");
     }
   }
 
-  return buildCanonicalAnchorConfig();
+  String result = buildCanonicalAnchorConfig();
+  Serial.println("--------------------------------------");
+  Serial.printf("FINAL geofence.enabled: %s\n", geofence.enabled ? "TRUE" : "FALSE");
+  Serial.printf("Output JSON: %s\n", result.c_str());
+  Serial.println("======================================\n");
+
+  return result;
 }
 
 void setPathValue(const String& path, double value, const String& source,
