@@ -69,6 +69,7 @@
 #include "hardware/nmea2000.h"
 #include "hardware/sensors.h"
 #include "hardware/led_status.h"
+#include "hardware/seatalk1.h"
 
 // ====== API MODULES ======
 #include "api/security.h"
@@ -452,8 +453,22 @@ void setup() {
     digitalWrite(NMEA_DE_ENABLE, LOW);  // Enable chip (inverted logic)
 
     Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
+    Serial.println("\n=== RS485 Configuration ===");
     Serial.println("NMEA0183 via RS485 started on terminal blocks A/B");
     Serial.println("Using built-in RS485 transceiver (GPIO 21/22)");
+    Serial.printf("Baud rate: %d (Common: 4800 or 9600)\n", NMEA_BAUD);
+    Serial.printf("DE pin (GPIO %d): LOW (Receive mode)\n", NMEA_DE);
+    Serial.printf("DE_ENABLE pin (GPIO %d): LOW (Chip enabled)\n", NMEA_DE_ENABLE);
+    Serial.println("\nDEPTH SOUNDER WIRING:");
+    Serial.println("  Terminal A (Blue)   -> RS485 Data+");
+    Serial.println("  Terminal GND (Black)-> Ground");
+    Serial.println("  Terminal B (White)  -> RS485 Data-");
+    Serial.println("\nNOTE: If no data received, try:");
+    Serial.println("  1. Swap A/B wires (reversed polarity)");
+    Serial.println("  2. Change baud rate to 9600 in config.h");
+    Serial.println("  3. Check depth sounder power");
+    Serial.println("\nWaiting for NMEA sentences ($SDDBT, $SDDPT)...");
+    Serial.println("===========================\n");
   #else
     Serial1.begin(NMEA_BAUD, SERIAL_8N1, NMEA_RX, NMEA_TX);
     Serial.println("NMEA0183 UART started on GPIO header pins RX:" + String(NMEA_RX) + " TX:" + String(NMEA_TX));
@@ -463,6 +478,18 @@ void setup() {
   Serial.println("Starting GPS module...");
   Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
   Serial.println("GPS UART started on pins RX:" + String(GPS_RX) + " TX:" + String(GPS_TX));
+
+  // Initialize Seatalk 1 (if enabled)
+  #ifdef USE_SEATALK1
+    Serial.println("\n=== Seatalk 1 Initialization ===");
+    if (initSeatalk1(SEATALK1_RX, SEATALK1_SERIAL)) {
+      Serial.println("Seatalk 1 initialized successfully");
+      setSeatalk1Debug(true);  // Enable debug output
+    } else {
+      Serial.println("Failed to initialize Seatalk 1");
+    }
+    Serial.println("================================\n");
+  #endif
 
   // Initialize NMEA2000 CAN Bus
   initNMEA2000();
@@ -700,19 +727,45 @@ void loop() {
     Serial.println("====================\n");
   }
 
-  // Read NMEA sentences from Serial1
+  // Read NMEA sentences from Serial1 (RS485)
+  static unsigned long lastRS485Activity = 0;
+  static unsigned long lastRS485Report = 0;
+  static int rs485BytesReceived = 0;
+
   while (Serial1.available()) {
     char c = Serial1.read();
+    lastRS485Activity = now;
+    rs485BytesReceived++;
 
       if (c == '\n' || c == '\r') {
         if (nmeaBuffer.length() > 6 && nmeaBuffer[0] == '$') {
-          handleNmeaSentence(nmeaBuffer, nullptr);
+          Serial.printf("RS485 RX: %s\n", nmeaBuffer.c_str());
+          handleNmeaSentence(nmeaBuffer, "RS485");
+        } else if (nmeaBuffer.length() > 0) {
+          // Debug: Show what we received even if it's not valid NMEA
+          Serial.printf("RS485 Invalid: [%s] (len=%d)\n", nmeaBuffer.c_str(), nmeaBuffer.length());
         }
         nmeaBuffer = "";
     } else if (c >= 32 && c <= 126) {
       if (nmeaBuffer.length() < 120) {
         nmeaBuffer += c;
       }
+    } else {
+      // Debug: Show ALL non-printable characters with their hex value
+      Serial.printf("RS485: Non-printable 0x%02X ('%c')\n", (uint8_t)c, (c >= 32 && c <= 126) ? c : '?');
+    }
+  }
+
+  // Report RS485 activity status every 10 seconds
+  if (now - lastRS485Report >= 10000) {
+    lastRS485Report = now;
+    if (rs485BytesReceived > 0) {
+      Serial.printf("\n[RS485 Status] Received %d bytes in last 10s\n", rs485BytesReceived);
+      rs485BytesReceived = 0;
+    } else if (now - lastRS485Activity > 30000) {
+      // No activity for 30 seconds
+      Serial.println("\n[RS485 Status] ⚠️ NO DATA for 30+ seconds");
+      Serial.println("  Check: Wiring, Baud rate, Depth sounder power");
     }
   }
 
@@ -739,6 +792,13 @@ void loop() {
 
   // Read I2C sensors
   readI2CSensors();
+
+  // Process Seatalk 1 data (if enabled)
+  #ifdef USE_SEATALK1
+    if (isSeatalk1Enabled()) {
+      processSeatalk1();
+    }
+  #endif
 
   // Flush anchor persistence (ensures NVS writes happen on main task)
   flushAnchorPersist();

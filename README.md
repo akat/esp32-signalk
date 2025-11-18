@@ -56,6 +56,16 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 - **Auto-detection**: Addresses 0x76 and 0x77
 - **Use Case**: Inside cabin environmental monitoring
 
+#### 5. Seatalk 1 (Raymarine Legacy Protocol)
+- **Hardware**: Requires opto-isolated level shifter (12V → 3.3V)
+- **Connection**: GPIO 32 (configurable) via level shifter
+- **Protocol**: 4800 baud, 9-bit, inverted serial
+- **Supports**: Depth, Wind, Speed, Heading, Water Temp
+- **Devices**: ST40, ST50, ST60+, Autohelm autopilots
+- **⚠️ WARNING**: Never connect directly to ESP32 - requires level shifter!
+- **📖 See [docs/SEATALK1_QUICKSTART.md](docs/SEATALK1_QUICKSTART.md) for setup**
+- **📖 See [docs/SEATALK1_HARDWARE.md](docs/SEATALK1_HARDWARE.md) for circuit details**
+
 ### Alarms & Notifications
 
 #### Geofence Alarm

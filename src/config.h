@@ -8,16 +8,27 @@
 #define CAN_SE_PIN GPIO_NUM_23  // Silent/Enable pin
 
 // NMEA0183 Configuration (TTGO T-CAN485 default RS485 pins)
+#define USE_RS485_FOR_NMEA     // Enable RS485 transceiver for depth sounder
 #define NMEA_RX 21
 #define NMEA_TX 22
 #define NMEA_DE 17
 #define NMEA_DE_ENABLE 19
-#define NMEA_BAUD 4800
+#define NMEA_BAUD 4800         // Common baud rates: 4800, 9600, 38400
+                                // If depth sounder not working, try changing to 9600
 
 // GPS Configuration
 #define GPS_BAUD 9600
 #define GPS_RX 25
 #define GPS_TX 18
+
+// Seatalk 1 Configuration (Raymarine proprietary protocol)
+// IMPORTANT: Requires opto-isolated level shifter (12V → 3.3V)
+// Never connect Seatalk directly to ESP32 - will damage GPIO!
+// #define USE_SEATALK1              // Uncomment to enable Seatalk 1
+#define SEATALK1_RX 32            // GPIO pin for Seatalk RX (via level shifter)
+#define SEATALK1_SERIAL 1         // Serial port to use (1 or 2)
+                                   // Note: If using Serial1, conflicts with NMEA0183 RS485
+                                   // Consider using Serial2 or different GPIO
 
 // LED Status Indicators (WS2812 RGB LED on TTGO T-CAN485)
 #define LED_PIN 4              // WS2812 RGB LED pin

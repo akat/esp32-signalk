@@ -1,0 +1,153 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    SEATALK 1 TO ESP32 LEVEL SHIFTER                       ║
+║                         (Optocoupler Circuit)                             ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SEATALK SIDE (12V)                                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+
+                          Seatalk Cable
+                          ┌──────────┐
+                          │          │
+        Yellow ───────────┤  Data    │  (12V signal, inverted)
+        Red    ───────────┤  +12V    │  (Optional, not connected)
+        Black  ───────────┤  Ground  │  (Common GND with ESP32)
+                          │          │
+                          └──────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ OPTOCOUPLER CIRCUIT (Galvanic Isolation)                                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+   Seatalk Yellow (Data)
+        │
+        │                   ┌────────────────────┐
+        ├───[R1: 10kΩ]─────┤ Seatalk +12V       │  (Pull-up to 12V)
+        │                   └────────────────────┘
+        │
+        │
+        ├───[R2: 4.7kΩ]────┐
+        │                  │
+        │               ┌──▼──┐  PC817 / 4N35
+        │               │  1  │  Optocoupler
+        │               │ ─►  │  (LED side)
+        │               │  2  │
+        │               └──┬──┘
+        │                  │
+        └──────────────────┴────────────┐
+                                        │
+                            ┌───────────▼────────┐
+                            │  Seatalk Ground    │
+                            └────────────────────┘
+
+
+                            ┌────────────────────┐
+                            │   ESP32 +3.3V      │
+                            └───────┬────────────┘
+                                    │
+                                [R3: 1kΩ]
+                                    │
+                               ┌────▼────┐  PC817 / 4N35
+                               │    4    │  (Phototransistor)
+                               │    ─►   │
+                               │    3    ├─────────► GPIO 32 (SEATALK1_RX)
+                               └────┬────┘           on ESP32
+                                    │
+                            ┌───────▼────────┐
+                            │   ESP32 GND    │
+                            └────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ COMPONENT VALUES                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+R1 = 10kΩ   (1/4W, 5%)   Pull-up resistor
+R2 = 4.7kΩ  (1/4W, 5%)   LED current limiting (~2mA)
+R3 = 1kΩ    (1/4W, 5%)   Collector pull-up
+
+Optocoupler: PC817, 4N35, or similar
+  - CTR (Current Transfer Ratio) > 50%
+  - VISO > 1000V (for safety)
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SIGNAL FLOW                                                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Seatalk 12V Signal → Optocoupler LED → Light → Phototransistor →
+→ 3.3V Signal → ESP32 GPIO 32
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ TESTING PROCEDURE                                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+1. Build circuit on breadboard/perfboard
+2. Connect Seatalk side ONLY
+3. Measure voltage at Pin 3 (ESP32 side output)
+   - Should pulse between 0V and ~3.0V
+   - **NEVER above 3.5V!**
+4. If voltage OK, connect to ESP32 GPIO 32
+5. Monitor serial output for Seatalk messages
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ALTERNATIVE: SIMPLE RESISTOR DIVIDER (NOT ISOLATED - USE WITH CAUTION!) │
+└─────────────────────────────────────────────────────────────────────────┘
+
+   Seatalk Yellow
+        │
+        ├───[20kΩ]────┬──────────► GPIO 32
+        │             │
+        │          [10kΩ]
+        │             │
+        └─────────────┴──────────► GND (common)
+
+WARNING: No galvanic isolation! Risk of ground loops.
+Use optocoupler circuit instead for boats with sensitive electronics.
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PINOUT REFERENCE                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+PC817 / 4N35 Pinout (DIP-4):
+     ┌─────┐
+  1 ─┤  ●  ├─ 4  (Vcc / Collector)
+     │     │
+  2 ─┤     ├─ 3  (Output to GPIO / Emitter)
+     └─────┘
+
+Pin 1: Anode  (LED +)
+Pin 2: Cathode (LED -)
+Pin 3: Emitter (Output -)
+Pin 4: Collector (Output +)
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ BILL OF MATERIALS (BOM)                                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Qty  Part              Value    Notes
+---  ----------------  -------  ------------------------------------
+1    Optocoupler       PC817    Or 4N35, TIL111
+1    Resistor          10kΩ     1/4W, 5%
+1    Resistor          4.7kΩ    1/4W, 5%
+1    Resistor          1kΩ      1/4W, 5%
+1    Perfboard         -        5cm x 3cm
+2    Screw terminals   -        For Seatalk connection
+1    Header pins       -        For ESP32 connection
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+Total cost: ~$2 USD (if you have parts) or ~$5 from electronics supplier
+
+Build time: 15-30 minutes
+
+Difficulty: Beginner (basic soldering required)
+
+═══════════════════════════════════════════════════════════════════════════

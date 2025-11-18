@@ -15,7 +15,8 @@
       "Bash(del nul)",
       "Bash(rm:*)",
       "Bash(cmd /c \"tasklist /FI \"\"IMAGENAME eq python.exe\"\"\")",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" device list)"
     ],
     "deny": [],
     "ask": []
