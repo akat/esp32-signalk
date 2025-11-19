@@ -26,6 +26,8 @@ extern struct GeofenceConfig geofence;
 extern struct DepthAlarmConfig depthAlarm;
 extern struct WindAlarmConfig windAlarm;
 extern Preferences prefs;
+extern HardwareConfig hardwareConfig;
+extern APConfig apConfig;
 
 // Forward declarations for utility functions
 extern String generateUUID();
@@ -131,6 +133,7 @@ const char* HTML_UI = R"html(
         <div class="hero-actions">
           <a href="/config" class="btn-link primary">TCP Settings</a>
           <a href="/admin" class="btn-link secondary">Admin Panel</a>
+          <a href="/settings" class="btn-link secondary">Settings</a>
         </div>
       </div>
     </div>
@@ -368,6 +371,7 @@ const char* HTML_CONFIG = R"html(
         <div class="hero-actions">
           <a href="/" class="btn-link primary">Dashboard</a>
           <a href="/admin" class="btn-link secondary">Admin Panel</a>
+          <a href="/settings" class="btn-link secondary">Settings</a>
         </div>
       </div>
     </div>
@@ -722,6 +726,7 @@ const char* HTML_ADMIN = R"html(
         <div class="hero-actions">
           <a href="/" class="btn-link primary">Dashboard</a>
           <a href="/config" class="btn-link secondary">TCP Settings</a>
+          <a href="/settings" class="btn-link secondary">Settings</a>
         </div>
       </div>
     </div>
@@ -1715,3 +1720,155 @@ void handleTriggerDynDnsUpdate(AsyncWebServerRequest* req) {
   serializeJson(doc, output);
   req->send(200, "application/json", output);
 }
+
+// ====== HARDWARE SETTINGS HANDLERS ======
+
+void handleGetHardwareSettings(AsyncWebServerRequest* req) {
+  DynamicJsonDocument doc(1024);
+
+  // GPS settings
+  JsonObject gps = doc.createNestedObject("gps");
+  gps["rx"] = hardwareConfig.gps_rx;
+  gps["tx"] = hardwareConfig.gps_tx;
+  gps["baud"] = hardwareConfig.gps_baud;
+
+  // RS485 settings
+  JsonObject rs485 = doc.createNestedObject("rs485");
+  rs485["rx"] = hardwareConfig.rs485_rx;
+  rs485["tx"] = hardwareConfig.rs485_tx;
+  rs485["de"] = hardwareConfig.rs485_de;
+  rs485["de_enable"] = hardwareConfig.rs485_de_enable;
+  rs485["baud"] = hardwareConfig.rs485_baud;
+
+  // Seatalk1 settings
+  JsonObject seatalk1 = doc.createNestedObject("seatalk1");
+  seatalk1["rx"] = hardwareConfig.seatalk1_rx;
+  seatalk1["baud"] = hardwareConfig.seatalk1_baud;
+
+  // CAN settings
+  JsonObject can = doc.createNestedObject("can");
+  can["rx"] = hardwareConfig.can_rx;
+  can["tx"] = hardwareConfig.can_tx;
+
+  String output;
+  serializeJson(doc, output);
+  req->send(200, "application/json", output);
+}
+
+void handleSetHardwareSettings(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total) {
+  if (index + len != total) {
+    return;
+  }
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, data, len);
+
+  if (error) {
+    req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  HardwareConfig newConfig = hardwareConfig;
+
+  // GPS settings
+  if (doc.containsKey("gps")) {
+    JsonObject gps = doc["gps"];
+    if (gps.containsKey("rx")) newConfig.gps_rx = gps["rx"];
+    if (gps.containsKey("tx")) newConfig.gps_tx = gps["tx"];
+    if (gps.containsKey("baud")) newConfig.gps_baud = gps["baud"];
+  }
+
+  // RS485 settings
+  if (doc.containsKey("rs485")) {
+    JsonObject rs485 = doc["rs485"];
+    if (rs485.containsKey("rx")) newConfig.rs485_rx = rs485["rx"];
+    if (rs485.containsKey("tx")) newConfig.rs485_tx = rs485["tx"];
+    if (rs485.containsKey("de")) newConfig.rs485_de = rs485["de"];
+    if (rs485.containsKey("de_enable")) newConfig.rs485_de_enable = rs485["de_enable"];
+    if (rs485.containsKey("baud")) newConfig.rs485_baud = rs485["baud"];
+  }
+
+  // Seatalk1 settings
+  if (doc.containsKey("seatalk1")) {
+    JsonObject seatalk1 = doc["seatalk1"];
+    if (seatalk1.containsKey("rx")) newConfig.seatalk1_rx = seatalk1["rx"];
+    if (seatalk1.containsKey("baud")) newConfig.seatalk1_baud = seatalk1["baud"];
+  }
+
+  // CAN settings
+  if (doc.containsKey("can")) {
+    JsonObject can = doc["can"];
+    if (can.containsKey("rx")) newConfig.can_rx = can["rx"];
+    if (can.containsKey("tx")) newConfig.can_tx = can["tx"];
+  }
+
+  saveHardwareConfig(newConfig);
+
+  req->send(200, "application/json", "{\"success\":true,\"message\":\"Hardware configuration saved. Restart required for changes to take effect.\"}");
+}
+
+void handleGetAPSettings(AsyncWebServerRequest* req) {
+  DynamicJsonDocument doc(256);
+  doc["ssid"] = apConfig.ssid;
+  doc["password"] = apConfig.password;
+
+  String output;
+  serializeJson(doc, output);
+  req->send(200, "application/json", output);
+}
+
+void handleSetAPSettings(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total) {
+  if (index + len != total) {
+    return;
+  }
+
+  DynamicJsonDocument doc(512);
+  DeserializationError error = deserializeJson(doc, data, len);
+
+  if (error) {
+    req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  APConfig newConfig = apConfig;
+
+  if (doc.containsKey("ssid")) {
+    newConfig.ssid = doc["ssid"].as<String>();
+  }
+
+  if (doc.containsKey("password")) {
+    newConfig.password = doc["password"].as<String>();
+  }
+
+  // Validate SSID (1-32 characters)
+  if (newConfig.ssid.length() == 0 || newConfig.ssid.length() > 32) {
+    req->send(400, "application/json", "{\"error\":\"SSID must be 1-32 characters\"}");
+    return;
+  }
+
+  // Validate password (8-63 characters for WPA2)
+  if (newConfig.password.length() < 8 || newConfig.password.length() > 63) {
+    req->send(400, "application/json", "{\"error\":\"Password must be 8-63 characters\"}");
+    return;
+  }
+
+  saveAPConfig(newConfig);
+
+  req->send(200, "application/json", "{\"success\":true,\"message\":\"AP configuration saved. Restart required for changes to take effect.\"}");
+}
+
+// ====== HARDWARE AND AP SETTINGS PAGE HANDLERS ======
+
+#include "hardware_settings_html.h"
+#include "ap_settings_html.h"
+
+void handleHardwareSettingsPage(AsyncWebServerRequest* req) {
+  req->send_P(200, "text/html", HARDWARE_SETTINGS_HTML);
+}
+
+void handleAPSettingsPage(AsyncWebServerRequest* req) {
+  req->send_P(200, "text/html", AP_SETTINGS_HTML);
+}
+
+// ====== WIFI RESET HANDLER ======
+

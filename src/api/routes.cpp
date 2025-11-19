@@ -366,6 +366,27 @@ void setupRoutes(AsyncWebServer& server) {
     handleTriggerDynDnsUpdate(req);
   });
 
+  // Hardware Settings API
+  server.on("/api/settings/hardware", HTTP_GET, [](AsyncWebServerRequest* req) {
+    if (!requireWebAuth(req)) return;
+    handleGetHardwareSettings(req);
+  });
+  server.on("/api/settings/hardware", HTTP_POST,
+    [](AsyncWebServerRequest* req) {
+      if (!requireWebAuth(req)) return;
+    }, NULL, handleSetHardwareSettings);
+
+  // AP Settings API
+  server.on("/api/settings/ap", HTTP_GET, [](AsyncWebServerRequest* req) {
+    if (!requireWebAuth(req)) return;
+    handleGetAPSettings(req);
+  });
+  server.on("/api/settings/ap", HTTP_POST,
+    [](AsyncWebServerRequest* req) {
+      if (!requireWebAuth(req)) return;
+    }, NULL, handleSetAPSettings);
+
+// Hardware Settings Page  server.on("/hardware-settings", HTTP_GET, [](AsyncWebServerRequest* req) {    if (!requireWebAuth(req)) return;    handleHardwareSettingsPage(req);  });  // AP Settings Page  server.on("/ap-settings", HTTP_GET, [](AsyncWebServerRequest* req) {    if (!requireWebAuth(req)) return;    handleAPSettingsPage(req);  });  // WiFi Reset API  server.on("/api/wifi/reset", HTTP_POST, [](AsyncWebServerRequest* req) {    if (!requireWebAuth(req)) return;    handleWiFiReset(req);  });
   // Expo Push Notification API (NOT protected - external services need access)
   server.on("/plugins/signalk-node-red/redApi/register-expo-token", HTTP_POST,
     [](AsyncWebServerRequest* req) {}, NULL, handleRegisterExpoToken);

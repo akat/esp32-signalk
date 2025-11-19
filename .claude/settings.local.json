@@ -1,24 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(test:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target clean)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" device monitor --baud 115200 --filter esp32_exception_decoder)",
-      "Bash(timeout /t 5 /nobreak)",
-      "Bash(nul)",
-      "Bash(timeout:*)",
-      "Bash(tasklist:*)",
-      "Bash(findstr:*)",
-      "Bash(taskkill:*)",
-      "Bash(del nul)",
-      "Bash(rm:*)",
-      "Bash(cmd /c \"tasklist /FI \"\"IMAGENAME eq python.exe\"\"\")",
-      "Bash(dir:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" device list)",
-      "Bash(git restore:*)",
-      "Bash(del AP_PASSWORD_FEATURE.md)"
+      "Bash(mk.py)",
+      "Bash(python mk.py:*)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)"
     ],
     "deny": [],
     "ask": []

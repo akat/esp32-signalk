@@ -1,0 +1,7 @@
+This file contains the complete settings HTML with 4 tabs:
+1. GPIO Configuration
+2. Baud Rates  
+3. Access Point
+4. Admin Password
+
+It should load current settings via API and save them back.

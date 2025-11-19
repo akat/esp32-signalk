@@ -83,4 +83,28 @@ void handleTriggerDynDnsUpdate(AsyncWebServerRequest* req);
 // POST /plugins/signalk-node-red/redApi/register-expo-token - Register Expo push token
 void handleRegisterExpoToken(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total);
 
+
+// ====== HARDWARE SETTINGS HANDLERS ======
+
+// GET /api/settings/hardware - Get hardware configuration (GPIO, baud rates)
+void handleGetHardwareSettings(AsyncWebServerRequest* req);
+
+// POST /api/settings/hardware - Update hardware configuration
+void handleSetHardwareSettings(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total);
+
+// GET /api/settings/ap - Get Access Point configuration
+void handleGetAPSettings(AsyncWebServerRequest* req);
+
+// POST /api/settings/ap - Update Access Point configuration
+void handleSetAPSettings(AsyncWebServerRequest* req, uint8_t *data, size_t len, size_t index, size_t total);
+
+// GET /hardware-settings - Serve hardware settings UI
+void handleHardwareSettingsPage(AsyncWebServerRequest* req);
+
+// GET /ap-settings - Serve AP settings UI
+void handleAPSettingsPage(AsyncWebServerRequest* req);
+
+// POST /api/wifi/reset - Reset WiFi settings and restart
+void handleWiFiReset(AsyncWebServerRequest* req);
+
 #endif  // API_HANDLERS_H

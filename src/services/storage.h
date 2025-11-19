@@ -40,4 +40,43 @@ void saveTcpConfig(String host, int port, bool enabled);
 void loadDynDnsConfig();
 void saveDynDnsConfig(const DynDnsConfig& config);
 
+// Hardware configuration (GPIO pins and baud rates)
+struct HardwareConfig {
+  // GPS
+  int gps_rx;
+  int gps_tx;
+  int gps_baud;
+
+  // RS485 (NMEA)
+  int rs485_rx;
+  int rs485_tx;
+  int rs485_de;
+  int rs485_de_enable;
+  int rs485_baud;
+
+  // Seatalk1
+  int seatalk1_rx;
+  int seatalk1_baud;
+
+  // CAN
+  int can_rx;
+  int can_tx;
+};
+
+extern HardwareConfig hardwareConfig;
+
+void loadHardwareConfig();
+void saveHardwareConfig(const HardwareConfig& config);
+
+// Access Point configuration
+struct APConfig {
+  String ssid;
+  String password;
+};
+
+extern APConfig apConfig;
+
+void loadAPConfig();
+void saveAPConfig(const APConfig& config);
+
 #endif // SERVICES_STORAGE_H

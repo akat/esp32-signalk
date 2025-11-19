@@ -261,6 +261,16 @@ void processTcpData() {
 }
 
 // ====== SETUP FUNCTION ======
+
+// WiFi Reset Handler (called from API routes)
+void handleWiFiReset(AsyncWebServerRequest* req) {
+  Serial.println("WiFi reset requested via API");
+  req->send(200, "application/json", "{\"success\":true,\"message\":\"WiFi settings reset. Device restarting...\"}");
+  delay(1000);
+  wm.resetSettings();
+  ESP.restart();
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -400,6 +410,8 @@ void setup() {
   // Load TCP configuration
   loadTcpConfig();
   loadDynDnsConfig();
+  loadHardwareConfig();
+  loadAPConfig();
 
   // Start WiFi in AP+STA mode (both Access Point and Station)
   // This keeps the AP running even when connected to another WiFi network
