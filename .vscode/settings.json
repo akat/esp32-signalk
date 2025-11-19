@@ -3,6 +3,8 @@
         "vector": "cpp",
         "set": "cpp",
         "algorithm": "cpp",
-        "map": "cpp"
+        "map": "cpp",
+        "cmath": "cpp",
+        "cstring": "cpp"
     }
 }

@@ -6,11 +6,18 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 
 ### Core Functionality
 - **SignalK HTTP/WebSocket Server** (Port 3000)
+  - Full SignalK v1 protocol compliance
+  - **Bi-directional Delta Updates** - Clients can send and receive updates
+  - **Automatic Delta Broadcasting** - Server echoes client updates to all subscribers (required for SignalK protocol compliance)
+- **NMEA 0183 TCP Server** (Port 10110) - Broadcast NMEA sentences to marine apps
 - **WiFi Access Point & Client Mode** with WiFiManager
 - **Token-Based Authentication** with admin approval UI
 - **Push Notifications** via Expo (iOS/Android)
 - **Real-time Alarms**: Geofence, Wind, Depth
+  - **Smart Anchor Position Management** - Set position with automatic validation
+  - **Flexible Geofence Control** - Enable/disable monitoring independently
 - **mDNS Discovery** (signalk.local)
+- **DynDNS / DuckDNS Updater** configurable from the TCP/DynDNS UI for dynamic WAN addresses
 - **Web Dashboard** for monitoring and configuration
 
 ### Data Sources
@@ -44,10 +51,22 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 - **Automatic**: Position, speed, and course updates
 
 #### 4. I2C Environmental Sensors
-- **Hardware**: I2C bus on GPIO 5 (SDA) / 32 (SCL)
+- **Hardware**: I2C bus on GPIO 5 (SDA) / 34 (SCL)
 - **BME280**: Temperature, Barometric Pressure, Humidity
 - **Auto-detection**: Addresses 0x76 and 0x77
 - **Use Case**: Inside cabin environmental monitoring
+
+#### 5. Seatalk 1 (Raymarine Legacy Protocol) ⭐ NEW: SoftwareSerial!
+- **Hardware**: Requires opto-isolated level shifter (12V → 3.3V)
+- **Connection**: GPIO 32 via level shifter (SoftwareSerial - no conflicts!)
+- **Protocol**: 4800 baud, 9-bit, inverted serial
+- **Supports**: Depth, Wind, Speed, Heading, Water Temp
+- **Devices**: ST40, ST50, ST60+, Autohelm autopilots
+- **⚠️ WARNING**: Never connect directly to ESP32 - requires level shifter!
+- **✅ No Conflicts**: Uses SoftwareSerial - works with RS485 + GPS simultaneously!
+- **📖 See [SEATALK_GPS_SETUP.md](SEATALK_GPS_SETUP.md) for complete setup guide**
+- **📖 See [docs/SEATALK1_QUICKSTART.md](docs/SEATALK1_QUICKSTART.md) for hardware**
+- **📖 See [docs/SEATALK1_HARDWARE.md](docs/SEATALK1_HARDWARE.md) for circuit details**
 
 ### Alarms & Notifications
 
@@ -127,11 +146,15 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 │  ├─ TX:    GPIO 18  (Pin 6)             │
 │  └─ Power: 3.3V (Pin 1), GND (Pin 2)    │
 │                                         │
+│  📍 Seatalk1 (SoftwareSerial) ⭐        │
+│  ├─ RX:    GPIO 32  (Pin 3)             │
+│  └─ Note:  Uses SoftwareSerial          │
+│            No conflict with RS485/GPS!  │
+│                                         │
 │  📍 I2C Sensors                         │
 │  ├─ SDA:   GPIO 5   (Pin 7)             │
-│  ├─ SCL:   GPIO 32  (Pin 3)             │
-│  └─ Note:  SCL shares with NMEA RX      │
-│            (OK when using RS485 mode)   │
+│  ├─ SCL:   GPIO 34  (Input-only)        │
+│  └─ Note:  GPIO 34 is input-only pin    │
 │                                         │
 │  📍 Other Hardware                      │
 │  ├─ RGB LED:     GPIO 4                 │
@@ -371,6 +394,12 @@ PUT  /signalk/v1/api/vessels/self/* (requires token)
 ```
 WS /signalk/v1/stream
 Subscribe to real-time SignalK deltas
+
+Features:
+- Bi-directional communication (send and receive)
+- Client-sent deltas are automatically broadcast to all subscribers
+- Full SignalK v1 delta protocol support
+- Supports anchor position updates from mobile apps
 ```
 
 ### Authentication
@@ -409,6 +438,77 @@ POST /api/geofence/disable
 POST /plugins/signalk-node-red/redApi/register-expo-token
 Body: {"token": "ExponentPushToken[...]"}
 ```
+
+### NMEA 0183 TCP Server
+
+**NEW FEATURE**: The ESP32 now broadcasts NMEA 0183 sentences via TCP on port 10110, making it compatible with any marine navigation software that supports TCP NMEA input (OpenCPN, iNavX, Navionics, etc.).
+
+#### Features
+- **Port**: 10110 (standard NMEA 0183 TCP port)
+- **Protocol**: TCP Server (supports multiple simultaneous clients)
+- **Max Clients**: 8 simultaneous connections
+- **Auto-conversion**: NMEA 2000 data is automatically converted to NMEA 0183 sentences
+- **Supported Sentences**:
+  - `$GPGGA` - GPS Fix Data (position, satellites, altitude) - 1Hz
+  - `$GPGLL` - Geographic Position (lat/lon) - 1Hz
+  - `$GPVTG` - Track Made Good and Ground Speed - 1Hz
+  - `$GPRMC` - Recommended Minimum Navigation Information - 1Hz
+  - `$WIMWV` - Wind Speed and Angle - 5Hz
+  - `$SDDPT` - Depth Below Transducer - 2Hz
+  - `$YXMTW` - Water Temperature - 0.5Hz
+
+#### Usage
+
+**Connect with marine apps:**
+```
+Connection Type: TCP
+Address: [ESP32-IP or signalk.local]
+Port: 10110
+```
+
+**Test with command line:**
+```bash
+# Windows
+telnet [ESP32-IP] 10110
+
+# Linux/Mac
+nc [ESP32-IP] 10110
+
+# Or use netcat
+ncat [ESP32-IP] 10110
+```
+
+**Example output:**
+```
+$GPGGA,123519,4807.038,N,01131.000,E,1,08,1.0,545.4,M,0.0,M,,*47
+$GPGLL,4807.038,N,01131.000,E,123519.000,A,A*5C
+$GPVTG,84.4,T,,M,22.4,N,41.5,K,A*2F
+$GPRMC,123519.000,A,4807.038,N,01131.000,E,22.40,84.40,150125,,,A*6A
+$WIMWV,45.0,T,12.50,M,A*2E
+$SDDPT,5.20,0.00*5B
+$YXMTW,18.5,C*1D
+```
+
+#### Compatible Applications
+- **OpenCPN**: Add connection → Network → TCP, address: [ESP32-IP], port: 10110
+- **iNavX** (iOS): Settings → NMEA → TCP Client → [ESP32-IP]:10110
+- **Navionics** (iOS/Android): Settings → Connect → TCP → [ESP32-IP]:10110
+- **Coastal Explorer**: Connections → Add → TCP Client → [ESP32-IP]:10110
+- **Any app supporting TCP NMEA 0183 input**
+
+#### Performance
+- **Latency**: <50ms end-to-end (NMEA2000 → TCP)
+- **CPU Impact**: ~3% additional load
+- **Memory**: ~3-4KB RAM for 8 clients
+- **Rate Limiting**: Smart throttling prevents data spam
+  - Position: 1Hz (once per second)
+  - Wind: 5Hz (5 times per second)
+  - Depth: 2Hz (twice per second)
+
+#### Client Management
+- **Auto-disconnect**: Inactive clients timeout after 30 seconds
+- **Reconnect**: Clients can reconnect automatically
+- **No authentication**: Open access for marine apps (configure firewall if needed)
 
 ## Configuration
 
@@ -618,11 +718,12 @@ Each SignalK value includes a `$source` field indicating where the data came fro
 
 ## Performance
 
-- **RAM Usage**: ~15.9% (52KB / 328KB)
-- **Flash Usage**: ~41.9% (1.32MB / 3.14MB)
+- **RAM Usage**: ~16.0% (52.5KB / 328KB)
+- **Flash Usage**: ~42.3% (1.33MB / 3.14MB)
 - **WiFi Reconnect**: Every 5 seconds if disconnected
 - **Sensor Update Rate**: 2 seconds (I2C sensors)
 - **NMEA2000 Processing**: Continuous (250 kbps CAN bus)
+- **NMEA 0183 TCP**: <50ms latency, supports 8 clients
 - **WebSocket Delta Rate**: 500ms minimum
 - **Push Notification Rate**: 3 seconds per alarm type
 
@@ -663,12 +764,36 @@ pio device monitor --baud 115200
 ```
 esp32-signalk/
 ├── src/
-│   └── main.cpp              # Main application code (~3800 lines)
-├── platformio.ini            # PlatformIO configuration
-├── README.md                 # This file (overview)
-├── PINOUT.md                 # GPIO pin identification guide
-├── RS485-GUIDE.md            # RS485 connection guide
-└── NMEA2000-GUIDE.md         # NMEA 2000 connection guide
+│   ├── main.cpp                      # Main application entry point
+│   ├── config.h                      # Configuration and pin definitions
+│   ├── types.h                       # Type definitions
+│   ├── api/                          # API handlers and routes
+│   │   ├── handlers.cpp/h           # HTTP request handlers
+│   │   ├── routes.cpp/h             # Route configuration
+│   │   └── security.cpp/h           # Authentication & authorization
+│   ├── hardware/                     # Hardware interfaces
+│   │   ├── nmea0183.cpp/h           # NMEA 0183 parsing
+│   │   ├── nmea2000.cpp/h           # NMEA 2000 CAN handlers
+│   │   └── sensors.cpp/h            # I2C sensor interface
+│   ├── services/                     # Background services
+│   │   ├── alarms.cpp/h             # Alarm management
+│   │   ├── expo_push.cpp/h          # Push notifications
+│   │   ├── nmea0183_tcp.cpp/h       # NEW! TCP NMEA server
+│   │   ├── storage.cpp/h            # Persistent storage
+│   │   └── websocket.cpp/h          # WebSocket management
+│   ├── signalk/                      # SignalK protocol
+│   │   ├── data_store.cpp/h         # Data storage
+│   │   └── globals.h                # Global variables
+│   └── utils/                        # Utility functions
+│       ├── conversions.cpp/h        # Unit conversions
+│       ├── nmea0183_converter.cpp/h # NEW! N2K to 0183 converter
+│       ├── time_utils.cpp/h         # Time handling
+│       └── uuid.cpp/h               # UUID generation
+├── platformio.ini                    # PlatformIO configuration
+├── README.md                         # This file (overview)
+├── PINOUT.md                         # GPIO pin identification guide
+├── RS485-GUIDE.md                    # RS485 connection guide
+└── NMEA2000-GUIDE.md                 # NMEA 2000 connection guide
 ```
 
 ### Library Dependencies
@@ -692,6 +817,14 @@ Uses `huge_app.csv` partition table:
 - **OTA Data**: 8KB (OTA metadata)
 - **No SPIFFS**: All flash space dedicated to application
 
+## Recent Updates
+
+### November 2025 - SignalK Protocol Compliance
+- ✅ **Fixed WebSocket Delta Broadcasting** - Server now properly echoes client-sent deltas to all subscribers (SignalK v1 requirement)
+- ✅ **Enhanced Anchor Management** - Improved logic for anchor position setting independent of geofence activation
+- ✅ **Mobile App Compatibility** - Full compatibility with 6pack and other SignalK-native mobile applications
+- ✅ **Simplified Geofence Logic** - Cleaner, more predictable behavior for anchor drop operations
+
 ## Future Enhancements
 
 - [x] RS485 NMEA 0183 support
@@ -699,15 +832,17 @@ Uses `huge_app.csv` partition table:
 - [x] GPS module integration
 - [x] I2C sensor support (BME280)
 - [x] Comprehensive documentation
+- [x] NMEA 0183 TCP server (port 10110)
+- [x] Full SignalK v1 protocol compliance
+- [x] Bi-directional WebSocket delta support
 - [ ] SD card data logging
 - [ ] More NMEA 2000 PGNs (engine, rudder, AIS)
 - [ ] Compass/IMU support (heel, pitch, roll)
-- [ ] NMEA 0183 output for autopilot
 - [ ] Web-based alarm configuration UI
 - [ ] Historical data graphs
 - [ ] AIS target tracking
 - [ ] OTA firmware updates
-- [ ] NMEA 2000 transmission mode
+- [ ] NMEA 2000 transmission mode (currently listen-only)
 
 ## License
 
