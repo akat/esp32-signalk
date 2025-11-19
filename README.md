@@ -51,19 +51,21 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 - **Automatic**: Position, speed, and course updates
 
 #### 4. I2C Environmental Sensors
-- **Hardware**: I2C bus on GPIO 5 (SDA) / 32 (SCL)
+- **Hardware**: I2C bus on GPIO 5 (SDA) / 34 (SCL)
 - **BME280**: Temperature, Barometric Pressure, Humidity
 - **Auto-detection**: Addresses 0x76 and 0x77
 - **Use Case**: Inside cabin environmental monitoring
 
-#### 5. Seatalk 1 (Raymarine Legacy Protocol)
+#### 5. Seatalk 1 (Raymarine Legacy Protocol) ⭐ NEW: SoftwareSerial!
 - **Hardware**: Requires opto-isolated level shifter (12V → 3.3V)
-- **Connection**: GPIO 32 (configurable) via level shifter
+- **Connection**: GPIO 32 via level shifter (SoftwareSerial - no conflicts!)
 - **Protocol**: 4800 baud, 9-bit, inverted serial
 - **Supports**: Depth, Wind, Speed, Heading, Water Temp
 - **Devices**: ST40, ST50, ST60+, Autohelm autopilots
 - **⚠️ WARNING**: Never connect directly to ESP32 - requires level shifter!
-- **📖 See [docs/SEATALK1_QUICKSTART.md](docs/SEATALK1_QUICKSTART.md) for setup**
+- **✅ No Conflicts**: Uses SoftwareSerial - works with RS485 + GPS simultaneously!
+- **📖 See [SEATALK_GPS_SETUP.md](SEATALK_GPS_SETUP.md) for complete setup guide**
+- **📖 See [docs/SEATALK1_QUICKSTART.md](docs/SEATALK1_QUICKSTART.md) for hardware**
 - **📖 See [docs/SEATALK1_HARDWARE.md](docs/SEATALK1_HARDWARE.md) for circuit details**
 
 ### Alarms & Notifications
@@ -144,11 +146,15 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 │  ├─ TX:    GPIO 18  (Pin 6)             │
 │  └─ Power: 3.3V (Pin 1), GND (Pin 2)    │
 │                                         │
+│  📍 Seatalk1 (SoftwareSerial) ⭐        │
+│  ├─ RX:    GPIO 32  (Pin 3)             │
+│  └─ Note:  Uses SoftwareSerial          │
+│            No conflict with RS485/GPS!  │
+│                                         │
 │  📍 I2C Sensors                         │
 │  ├─ SDA:   GPIO 5   (Pin 7)             │
-│  ├─ SCL:   GPIO 32  (Pin 3)             │
-│  └─ Note:  SCL shares with NMEA RX      │
-│            (OK when using RS485 mode)   │
+│  ├─ SCL:   GPIO 34  (Input-only)        │
+│  └─ Note:  GPIO 34 is input-only pin    │
 │                                         │
 │  📍 Other Hardware                      │
 │  ├─ RGB LED:     GPIO 4                 │

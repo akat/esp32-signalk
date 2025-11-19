@@ -16,7 +16,9 @@
       "Bash(rm:*)",
       "Bash(cmd /c \"tasklist /FI \"\"IMAGENAME eq python.exe\"\"\")",
       "Bash(dir:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" device list)"
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" device list)",
+      "Bash(git restore:*)",
+      "Bash(del AP_PASSWORD_FEATURE.md)"
     ],
     "deny": [],
     "ask": []

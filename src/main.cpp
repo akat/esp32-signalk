@@ -75,6 +75,7 @@
 #include "api/security.h"
 #include "api/handlers.h"
 #include "api/routes.h"
+#include "api/web_auth.h"
 
 // ====== GLOBAL VARIABLE DEFINITIONS ======
 // These are declared as 'extern' in various header files and defined here
@@ -482,7 +483,7 @@ void setup() {
   // Initialize Seatalk 1 (if enabled)
   #ifdef USE_SEATALK1
     Serial.println("\n=== Seatalk 1 Initialization ===");
-    if (initSeatalk1(SEATALK1_RX, SEATALK1_SERIAL)) {
+    if (initSeatalk1(SEATALK1_RX)) {
       Serial.println("Seatalk 1 initialized successfully");
       setSeatalk1Debug(true);  // Enable debug output
     } else {
@@ -530,6 +531,11 @@ void setup() {
 
     req->send(401, "text/plain", "Unauthorized");
   });
+
+  // Initialize web authentication
+  Serial.println("Initializing web authentication...");
+  initWebAuth();
+  Serial.println("Web authentication initialized");
 
   // WebSocket setup
   Serial.println("Setting up WebSocket...");
@@ -657,6 +663,7 @@ uint32_t lastWsCleanup = 0;
 uint32_t lastStatusLog = 0;
 uint32_t lastWifiCheck = 0;
 uint32_t lastWifiReconnect = 0;
+uint32_t lastSessionCleanup = 0;
 bool wasWifiConnected = false;
 int wifiReconnectAttempts = 0;
 
@@ -820,6 +827,12 @@ void loop() {
   if (now - lastWsCleanup > WS_CLEANUP_MS) {
     lastWsCleanup = now;
     ws.cleanupClients();
+  }
+
+  // Cleanup web sessions periodically
+  if (now - lastSessionCleanup > WEB_SESSION_CLEANUP_MS) {
+    lastSessionCleanup = now;
+    cleanupWebSessions();
   }
 
   delay(1);

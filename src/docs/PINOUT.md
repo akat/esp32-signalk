@@ -79,13 +79,25 @@ VCC           ────→  3.3V (Pin 1)
 GND           ────→  GND (Pin 2 or 12)
 ```
 
+### For Seatalk1 (SoftwareSerial)
+
+```
+Seatalk Level Shifter   T-CAN485 GPIO Header
+─────────────────────────────────────────────
+Output (3.3V)    ────→  GPIO 32 (Pin 3) - RX
+GND              ────→  GND (Pin 2 or 12)
+
+Note: Uses SoftwareSerial - no conflict with RS485 or GPS!
+      GPIO 32 is now dedicated to Seatalk1
+```
+
 ### For BME280 Sensor (I2C)
 
 ```
 BME280 Sensor        T-CAN485 GPIO Header
 ─────────────────────────────────────────
 SDA           ────→  GPIO 5 (Pin 7)
-SCL           ────→  GPIO 34 (Pin 8)
+SCL           ────→  GPIO 34 (Pin 8) - Input-only
 VCC           ────→  3.3V (Pin 1)
 GND           ────→  GND (Pin 2 or 12)
 ```
@@ -108,19 +120,19 @@ GND           ────→  GND (Pin 2 or 12)
 | GPIO 26 | CAN RX | CAN receive |
 | GPIO 27 | CAN TX | CAN transmit |
 
-## 🟢 Available Pins on GPIO Header
+## 🟢 GPIO Pin Usage Summary
 
-| GPIO | Input/Output | Best Use |
-|------|-------------|----------|
-| GPIO 5 | I/O | I2C SDA, General I/O |
-| GPIO 18 | I/O | Serial TX, General I/O |
-| GPIO 25 | I/O | Serial RX, ADC |
-| GPIO 32 | I/O | Serial RX, ADC |
-| GPIO 33 | I/O | Serial TX, ADC |
-| GPIO 34 | Input Only | I2C SCL, ADC |
-| GPIO 35 | Input Only | ADC, Button input |
-| GPIO 36 | Input Only | ADC, Button input |
-| GPIO 39 | Input Only | ADC, Button input |
+| GPIO | Status | Usage | Notes |
+|------|--------|-------|-------|
+| GPIO 5 | ✅ Available | I2C SDA | Can be used for BME280 |
+| GPIO 18 | ✅ Used | GPS TX (Serial2) | Fixed assignment |
+| GPIO 25 | ✅ Used | GPS RX (Serial2) | Fixed assignment |
+| GPIO 32 | ✅ Used | Seatalk1 RX (SoftwareSerial) | No conflicts! |
+| GPIO 33 | 🟡 Available | Backup I/O | Optional expansion |
+| GPIO 34 | ✅ Available | I2C SCL | Input-only, pull-up required |
+| GPIO 35 | 🟡 Available | ADC / Input | Input-only |
+| GPIO 36 | 🟡 Available | ADC / Input | Input-only |
+| GPIO 39 | 🟡 Available | ADC / Input | Input-only |
 
 ## 🔍 How to Identify Pins on Your Physical Board
 

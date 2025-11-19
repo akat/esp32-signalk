@@ -1,9 +1,15 @@
 #include "seatalk1.h"
 #include "../signalk/data_store.h"
-#include <HardwareSerial.h>
+#include "../config.h"
 
-// Serial port for Seatalk
-static HardwareSerial* seatalkSerial = nullptr;
+#ifdef SEATALK1_USE_SOFTSERIAL
+  #include <SoftwareSerial.h>
+  static SoftwareSerial* seatalkSerial = nullptr;
+#else
+  #include <HardwareSerial.h>
+  static HardwareSerial* seatalkSerial = nullptr;
+#endif
+
 static bool seatalk1Enabled = false;
 static bool debugEnabled = false;
 
@@ -22,27 +28,33 @@ static uint32_t parityErrors = 0;
 /**
  * Initialize Seatalk 1 interface
  */
-bool initSeatalk1(uint8_t rxPin, uint8_t serialPort) {
+bool initSeatalk1(uint8_t rxPin) {
   Serial.println("\n=== Initializing Seatalk 1 ===");
 
-  // Select serial port
-  if (serialPort == 1) {
-    seatalkSerial = &Serial1;
-  } else if (serialPort == 2) {
-    seatalkSerial = &Serial2;
-  } else {
-    Serial.println("ERROR: Invalid serial port for Seatalk");
+#ifdef SEATALK1_USE_SOFTSERIAL
+  // Use SoftwareSerial - no hardware serial conflicts!
+  Serial.println("Mode: SoftwareSerial (no RS485/GPS conflicts)");
+
+  // Create SoftwareSerial instance (RX only, no TX needed for Seatalk)
+  seatalkSerial = new SoftwareSerial(rxPin, -1, true);  // inverted = true
+
+  if (!seatalkSerial) {
+    Serial.println("ERROR: Failed to create SoftwareSerial instance");
     return false;
   }
 
-  // Configure UART for Seatalk
-  // We use MARK parity to detect the 9th bit (command bit)
-  // When 9th bit = 1 (command byte), parity error occurs with SPACE parity
-  // When 9th bit = 0 (data byte), no parity error with SPACE parity
-  seatalkSerial->begin(SEATALK_BAUD, SERIAL_8N1, rxPin, -1, true);  // inverted = true
+  // Begin SoftwareSerial at Seatalk baud rate
+  seatalkSerial->begin(SEATALK_BAUD);
 
-  // Alternative: Use parity detection
-  // seatalkSerial->begin(SEATALK_BAUD, SERIAL_9N1, rxPin, -1, true);
+  Serial.println("SoftwareSerial initialized successfully");
+#else
+  // Fallback: Use HardwareSerial (legacy mode)
+  Serial.println("Mode: HardwareSerial (may conflict with RS485)");
+  Serial.println("WARNING: Consider enabling SEATALK1_USE_SOFTSERIAL in config.h");
+
+  seatalkSerial = &Serial1;
+  seatalkSerial->begin(SEATALK_BAUD, SERIAL_8N1, rxPin, -1, true);  // inverted = true
+#endif
 
   seatalk1Enabled = true;
 
@@ -51,7 +63,7 @@ bool initSeatalk1(uint8_t rxPin, uint8_t serialPort) {
   Serial.println("Signal: Inverted (12V bus via level shifter)");
   Serial.println("\n*** HARDWARE REQUIREMENTS ***");
   Serial.println("1. Opto-isolated level shifter (12V → 3.3V)");
-  Serial.println("2. Inverted logic (built into ESP32 UART)");
+  Serial.println("2. Inverted logic (handled by SoftwareSerial)");
   Serial.println("3. Seatalk wiring:");
   Serial.println("   - Yellow wire → Level shifter input");
   Serial.println("   - Red wire → +12V (keep isolated!)");

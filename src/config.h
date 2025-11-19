@@ -13,7 +13,7 @@
 #define NMEA_TX 22
 #define NMEA_DE 17
 #define NMEA_DE_ENABLE 19
-#define NMEA_BAUD 4800         // Common baud rates: 4800, 9600, 38400
+#define NMEA_BAUD 9600         // Common baud rates: 4800, 9600, 38400
                                 // If depth sounder not working, try changing to 9600
 
 // GPS Configuration
@@ -24,11 +24,10 @@
 // Seatalk 1 Configuration (Raymarine proprietary protocol)
 // IMPORTANT: Requires opto-isolated level shifter (12V → 3.3V)
 // Never connect Seatalk directly to ESP32 - will damage GPIO!
-// #define USE_SEATALK1              // Uncomment to enable Seatalk 1
+#define USE_SEATALK1              // Enable Seatalk 1 (SoftwareSerial - no conflicts!)
 #define SEATALK1_RX 32            // GPIO pin for Seatalk RX (via level shifter)
-#define SEATALK1_SERIAL 1         // Serial port to use (1 or 2)
-                                   // Note: If using Serial1, conflicts with NMEA0183 RS485
-                                   // Consider using Serial2 or different GPIO
+#define SEATALK1_USE_SOFTSERIAL   // Use SoftwareSerial (no conflict with RS485/GPS)
+                                   // SoftwareSerial on GPIO 32 = no hardware serial conflict!
 
 // LED Status Indicators (WS2812 RGB LED on TTGO T-CAN485)
 #define LED_PIN 4              // WS2812 RGB LED pin

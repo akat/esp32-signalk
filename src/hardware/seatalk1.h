@@ -45,10 +45,11 @@ struct SeatalkMessage {
  * Initialize Seatalk 1 interface
  *
  * @param rxPin GPIO pin connected to Seatalk data (via level shifter)
- * @param serialPort Hardware serial port to use (1 or 2)
  * @return true if initialization successful
+ *
+ * Note: Now uses SoftwareSerial (no hardware serial conflicts)
  */
-bool initSeatalk1(uint8_t rxPin, uint8_t serialPort = 1);
+bool initSeatalk1(uint8_t rxPin);
 
 /**
  * Process incoming Seatalk data
