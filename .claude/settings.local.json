@@ -3,7 +3,11 @@
     "allow": [
       "Bash(mk.py)",
       "Bash(python mk.py:*)",
-      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)"
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload)",
+      "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target clean)",
+      "Bash(timeout /t 3)",
+      "Bash(del /F /Q .piobuildesp32devsrc*.o)"
     ],
     "deny": [],
     "ask": []

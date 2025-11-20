@@ -7,7 +7,7 @@ const char* HTML_UI = R"html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SignalK Server</title>
+  <title>SignalK Server - TEST VERSION</title>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -93,8 +93,12 @@ const char* HTML_UI = R"html(
           <p class="subtitle">Monitor live SignalK data from your ESP32 gateway and confirm connections at a glance.</p>
         </div>
         <div class="hero-actions">
-          <a href="/config" class="btn-link primary">TCP Settings</a>
+          <a href="/" class="btn-link primary">Dashboard</a>
           <a href="/admin" class="btn-link secondary">Admin Panel</a>
+          <a href="/config" class="btn-link secondary">Network</a>
+          <a href="/settings" class="btn-link secondary">Password</a>
+          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
         </div>
       </div>
     </div>

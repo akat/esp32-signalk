@@ -106,18 +106,43 @@ const char* HTML_UI = R"html(
       body { padding: 18px; }
       .card { padding: 20px; }
       .hero-text h1 { font-size: 26px; }
+      .summary-grid { grid-template-columns: 1fr; }
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 900px) and (orientation: landscape) {
+      table { min-width: 100%; font-size: 13px; }
+      th, td { padding: 10px 12px; font-size: 13px; }
+      code { font-size: 11px; padding: 4px 8px; }
+      .value { font-size: 13px; }
+      .timestamp { font-size: 11px; }
+    }
+
+    @media (max-width: 640px) and (orientation: portrait) {
+      body { padding: 12px; }
+      .card { padding: 16px; }
       table, thead, tbody, th, td, tr { display: block; width: 100%; }
       thead { display: none; }
       .table-wrapper { border: none; }
-      tr { background: #fff; border: 1px solid var(--border); border-radius: 14px; margin-bottom: 14px; padding: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05); }
-      td { border: none; padding: 8px 0; display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
-      td::before { content: attr(data-label); font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
-      td.path-col { flex-direction: column; }
-      td.path-col code { margin-top: 4px; }
-      td:last-child { border-bottom: none; }
+      tr { background: #fff; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; padding: 14px; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06); }
+      td { border: none; padding: 10px 0; display: block; font-size: 14px; }
+      td::before { content: attr(data-label); display: block; font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; margin-bottom: 4px; }
+      td code { display: block; width: 100%; font-size: 11px; padding: 8px; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap; }
+      td .value { display: inline-block; font-size: 16px; }
+      td .timestamp { display: block; font-size: 11px; word-break: break-word; margin-top: 2px; }
+      td:last-child { border-bottom: none; padding-bottom: 0; }
+      td:first-child { padding-top: 0; }
+    }
+
+    @media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+      body { padding: 8px; }
+      .card { padding: 12px; margin-bottom: 12px; }
+      .hero-card { padding: 16px; }
+      .hero-text h1 { font-size: 22px; }
+      table { font-size: 12px; }
+      th, td { padding: 8px 10px; font-size: 12px; }
+      code { font-size: 10px; padding: 4px 6px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .value { font-size: 12px; }
+      .timestamp { font-size: 10px; }
     }
   </style>
 </head>
@@ -131,9 +156,12 @@ const char* HTML_UI = R"html(
           <p class="subtitle">Monitor live SignalK data from your ESP32 gateway and confirm connections at a glance.</p>
         </div>
         <div class="hero-actions">
-          <a href="/config" class="btn-link primary">TCP Settings</a>
+          <a href="/" class="btn-link primary">Dashboard</a>
           <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/settings" class="btn-link secondary">Settings</a>
+          <a href="/config" class="btn-link secondary">Network</a>
+          <a href="/settings" class="btn-link secondary">Password</a>
+          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
         </div>
       </div>
     </div>
@@ -371,7 +399,10 @@ const char* HTML_CONFIG = R"html(
         <div class="hero-actions">
           <a href="/" class="btn-link primary">Dashboard</a>
           <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/settings" class="btn-link secondary">Settings</a>
+          <a href="/config" class="btn-link secondary">Network</a>
+          <a href="/settings" class="btn-link secondary">Password</a>
+          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
         </div>
       </div>
     </div>
@@ -725,8 +756,11 @@ const char* HTML_ADMIN = R"html(
         </div>
         <div class="hero-actions">
           <a href="/" class="btn-link primary">Dashboard</a>
-          <a href="/config" class="btn-link secondary">TCP Settings</a>
-          <a href="/settings" class="btn-link secondary">Settings</a>
+          <a href="/admin" class="btn-link secondary">Admin Panel</a>
+          <a href="/config" class="btn-link secondary">Network</a>
+          <a href="/settings" class="btn-link secondary">Password</a>
+          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
         </div>
       </div>
     </div>
