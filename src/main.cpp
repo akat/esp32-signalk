@@ -672,6 +672,7 @@ void setup() {
 
 // ====== MAIN LOOP ======
 uint32_t lastWsCleanup = 0;
+uint32_t lastWsPing = 0;
 uint32_t lastStatusLog = 0;
 uint32_t lastWifiCheck = 0;
 uint32_t lastWifiReconnect = 0;
@@ -833,6 +834,30 @@ void loop() {
   // Broadcast WebSocket deltas
   if (ws.count() > 0) {
     broadcastDeltas();
+  }
+
+  // Send WebSocket heartbeat to keep connections alive (every 20 seconds)
+  if (now - lastWsPing > 20000) {
+    lastWsPing = now;
+    if (ws.count() > 0) {
+      // Send a lightweight heartbeat delta to all clients
+      DynamicJsonDocument heartbeat(256);
+      heartbeat["context"] = "vessels." + vesselUUID;
+      JsonArray updates = heartbeat.createNestedArray("updates");
+      JsonObject update = updates.createNestedObject();
+      update["timestamp"] = iso8601Now();
+      JsonObject source = update.createNestedObject("source");
+      source["label"] = serverName;
+      source["type"] = "NMEA2000";
+      JsonArray values = update.createNestedArray("values");
+      JsonObject val = values.createNestedObject();
+      val["path"] = "navigation.heartbeat";
+      val["value"] = millis();
+
+      String heartbeatMsg;
+      serializeJson(heartbeat, heartbeatMsg);
+      ws.textAll(heartbeatMsg);
+    }
   }
 
   // Cleanup WebSocket clients periodically
