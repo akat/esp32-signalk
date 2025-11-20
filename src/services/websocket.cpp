@@ -102,6 +102,22 @@ void broadcastDeltas() {
   for (auto& kv : dataStore) {
     if (!kv.second.changed) continue;
 
+    // Skip items with empty or invalid paths
+    if (kv.first.length() == 0) {
+      Serial.printf("WARNING: Skipping empty path\n");
+      kv.second.changed = false;
+      continue;
+    }
+
+    // Additional check for whitespace-only paths
+    String trimmedPath = kv.first;
+    trimmedPath.trim();
+    if (trimmedPath.length() == 0) {
+      Serial.printf("WARNING: Skipping whitespace path: '%s' len=%d\n", kv.first.c_str(), kv.first.length());
+      kv.second.changed = false;
+      continue;
+    }
+
     JsonObject val = values.createNestedObject();
     val["path"] = kv.first;
 
@@ -135,15 +151,67 @@ void broadcastDeltas() {
 
   if (!hasChanges) return;
 
+  // Clean up any empty objects in the values array before sending
+  JsonArray values_check = updates[0]["values"];
+  for (int i = values_check.size() - 1; i >= 0; i--) {
+    JsonObject obj = values_check[i];
+    if (!obj.containsKey("path") || obj["path"].isNull() || obj["path"].as<String>().length() == 0) {
+      Serial.printf("ERROR: Removing invalid item from values array at index %d\n", i);
+      values_check.remove(i);
+    }
+  }
+
+  // If all items were removed, don't send anything
+  if (values_check.size() == 0) {
+    Serial.println("WARNING: All items in values array were invalid, not broadcasting");
+    return;
+  }
+
   String output;
   serializeJson(doc, output);
+
+  // CRITICAL VALIDATION: Parse the serialized JSON and verify no empty objects in values array
+  DynamicJsonDocument verify(4096);
+  DeserializationError error = deserializeJson(verify, output);
+  if (error) {
+    Serial.printf("ERROR: Failed to parse serialized JSON for validation: %s\n", error.c_str());
+    return; // Don't send corrupted JSON
+  }
+
+  // Check if updates array exists and has at least one update
+  if (verify.containsKey("updates") && verify["updates"].size() > 0) {
+    JsonArray updates_array = verify["updates"];
+    for (JsonVariant update_var : updates_array) {
+      JsonObject update_obj = update_var.as<JsonObject>();
+      if (update_obj.containsKey("values")) {
+        JsonArray vals = update_obj["values"];
+        for (JsonVariant v : vals) {
+          JsonObject obj = v.as<JsonObject>();
+          // Check if object is empty or has no path
+          if (obj.size() == 0) {
+            Serial.println("ERROR: Found completely empty object {} in serialized JSON, dropping entire message");
+            return; // Don't send this message at all
+          }
+          if (!obj.containsKey("path")) {
+            Serial.println("ERROR: Found object without 'path' field in serialized JSON, dropping entire message");
+            return; // Don't send this message at all
+          }
+          String path_check = obj["path"].as<String>();
+          if (path_check.length() == 0) {
+            Serial.println("ERROR: Found object with empty path string in serialized JSON, dropping entire message");
+            return; // Don't send this message at all
+          }
+        }
+      }
+    }
+  }
 
   // Debug: Log WebSocket broadcast
   static uint32_t lastDebugLog = 0;
   if (millis() - lastDebugLog > 5000) {  // Log every 5 seconds to avoid spam
-    Serial.println("=== WebSocket Broadcast ===");
+    Serial.println("=== WebSocket Broadcast (validated) ===");
     Serial.println(output);
-    Serial.println("==========================");
+    Serial.println("=======================================");
     lastDebugLog = millis();
   }
 
@@ -315,12 +383,32 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     bool hasData = false;
 
     // Send current values for subscribed paths
+    Serial.printf("DEBUG subscription: dataStore has %d items\n", dataStore.size());
     for (auto& kv : dataStore) {
-      // Check if this path is subscribed
-      if (!isPathSubscribed(sub, kv.first)) {
+      Serial.printf("DEBUG subscription: checking path='%s' len=%d\n", kv.first.c_str(), kv.first.length());
+
+      // Skip items with empty or invalid paths
+      if (kv.first.length() == 0) {
+        Serial.printf("WARNING: Skipping empty path in subscription\n");
         continue;
       }
 
+      // Additional check for whitespace-only paths
+      String trimmedPath = kv.first;
+      trimmedPath.trim();
+      if (trimmedPath.length() == 0) {
+        Serial.printf("WARNING: Skipping whitespace path in subscription: '%s' len=%d\n",
+                      kv.first.c_str(), kv.first.length());
+        continue;
+      }
+
+      // Check if this path is subscribed
+      if (!isPathSubscribed(sub, kv.first)) {
+        Serial.printf("DEBUG subscription: path NOT subscribed, skipping\n");
+        continue;
+      }
+
+      Serial.printf("DEBUG subscription: Adding to JSON\n");
       hasData = true;
       JsonObject val = values.createNestedObject();
       val["path"] = kv.first;

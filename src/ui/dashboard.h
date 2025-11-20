@@ -182,6 +182,19 @@ const char* HTML_UI = R"html(
             if (update.values) {
               update.values.forEach(item => {
                 const path = item.path;
+
+                // Skip items without a valid path
+                if (!path || typeof path !== 'string') {
+                  console.warn('Skipping item with invalid path:', item);
+                  return;
+                }
+
+                // Skip items without a value
+                if (item.value === undefined || item.value === null) {
+                  console.warn('Skipping item with missing value:', item);
+                  return;
+                }
+
                 let value = item.value;
 
                 if (typeof value === 'number') {
@@ -210,7 +223,9 @@ const char* HTML_UI = R"html(
     function renderTable() {
       tbody.innerHTML = '';
 
-      const sortedPaths = Array.from(paths.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+      const sortedPaths = Array.from(paths.entries())
+        .filter(([path]) => path && typeof path === 'string')
+        .sort((a, b) => a[0].localeCompare(b[0]));
 
       sortedPaths.forEach(([path, data]) => {
         const tr = document.createElement('tr');

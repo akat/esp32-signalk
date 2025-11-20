@@ -245,6 +245,16 @@ const char* HTML_UI = R"html(
             if (update.values) {
               update.values.forEach(item => {
                 const path = item.path;
+                if (!path || typeof path !== 'string') {
+                  console.warn('Skipping item with invalid path:', item);
+                  return;
+                }
+
+                if (item.value === undefined || item.value === null) {
+                  console.warn('Skipping item with missing value:', item);
+                  return;
+                }
+
                 let value = item.value;
 
                 if (typeof value === 'number') {
@@ -273,7 +283,9 @@ const char* HTML_UI = R"html(
     function renderTable() {
       tbody.innerHTML = '';
 
-      const sortedPaths = Array.from(paths.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+      const sortedPaths = Array.from(paths.entries())
+        .filter(([path]) => path && typeof path === 'string')
+        .sort((a, b) => a[0].localeCompare(b[0]));
 
       sortedPaths.forEach(([path, data]) => {
         const tr = document.createElement('tr');
@@ -1378,7 +1390,11 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
 // ====== WEB UI HANDLERS ======
 
 void handleRoot(AsyncWebServerRequest* req) {
-  req->send(200, "text/html", HTML_UI);
+  AsyncWebServerResponse* response = req->beginResponse(200, "text/html", HTML_UI);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  response->addHeader("Pragma", "no-cache");
+  response->addHeader("Expires", "0");
+  req->send(response);
 }
 
 void handleConfig(AsyncWebServerRequest* req) {
@@ -1905,4 +1921,3 @@ void handleAPSettingsPage(AsyncWebServerRequest* req) {
 }
 
 // ====== WIFI RESET HANDLER ======
-
