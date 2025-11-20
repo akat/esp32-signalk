@@ -89,6 +89,10 @@ const char* HTML_CONFIG = R"html(
         <div class="hero-actions">
           <a href="/" class="btn-link primary">Dashboard</a>
           <a href="/admin" class="btn-link secondary">Admin Panel</a>
+          <a href="/config" class="btn-link secondary">Network</a>
+          <a href="/settings" class="btn-link secondary">Password</a>
+          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
         </div>
       </div>
     </div>
