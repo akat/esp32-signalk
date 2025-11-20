@@ -3,10 +3,10 @@
 # Total: 4MB Flash
 
 # NVS - Non-Volatile Storage (for WiFi, settings, tokens)
-nvs,      data, nvs,     0x9000,  0x6000,
+nvs,      data, nvs,     0x9000,  0x5000,
 
 # OTA Data - for OTA updates
-otadata,  data, ota,     0xF000,  0x2000,
+otadata,  data, ota,     0xE000,  0x2000,
 
 # App0 - Main application partition
 app0,     app,  ota_0,   0x10000, 0x1E0000,
