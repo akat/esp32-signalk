@@ -343,7 +343,7 @@ const char* HTML_CONFIG = R"html(
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
-    .container { max-width: 800px; margin: 0 auto; }
+    .container { max-width: 1200px; margin: 0 auto; }
 
     .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
     .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
@@ -358,6 +358,7 @@ const char* HTML_CONFIG = R"html(
     .btn-link.secondary { color: #fff; }
     .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
 
+    h2 { font-size: 20px; margin-bottom: 6px; }
     .muted { color: var(--muted); font-size: 14px; }
     .subtle-card { background: #eef4ff; border: 1px solid #dbe4ff; color: var(--muted); }
 
@@ -698,6 +699,7 @@ const char* HTML_ADMIN = R"html(
       --bg: #f5f7fb;
       --card-bg: #ffffff;
       --primary: #1f7afc;
+      --primary-dark: #1554c0;
       --text: #1f2a37;
       --muted: #5d6b82;
       --border: #e4e7ec;
@@ -705,7 +707,7 @@ const char* HTML_ADMIN = R"html(
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
-    .container { max-width: 1000px; margin: 0 auto; }
+    .container { max-width: 1200px; margin: 0 auto; }
 
     .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
     .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
@@ -720,9 +722,12 @@ const char* HTML_ADMIN = R"html(
     .btn-link.secondary { color: #fff; }
     .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
 
+    h2 { font-size: 20px; margin-bottom: 6px; }
+    .muted { color: var(--muted); font-size: 14px; }
     .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
     .card-header span { color: var(--muted); font-size: 13px; }
 
+    code { background: #f0f4ff; padding: 6px 10px; border-radius: 8px; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; display: inline-block; width: 100%; word-break: break-all; }
     .table-wrapper { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
     table { width: 100%; border-collapse: collapse; min-width: 520px; }
     th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: top; }

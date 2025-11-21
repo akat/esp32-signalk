@@ -11,10 +11,10 @@
 #define USE_RS485_FOR_NMEA     // Enable RS485 transceiver for depth sounder
 #define NMEA_RX 21
 #define NMEA_TX 22
-#define NMEA_DE 17
-#define NMEA_DE_ENABLE 19
-#define NMEA_BAUD 9600         // Common baud rates: 4800, 9600, 38400
-                                // If depth sounder not working, try changing to 9600
+#define NMEA_DE 19             // Direction Enable (DE) pin - TTGO T-CAN485
+#define NMEA_DE_ENABLE 17      // Receiver Enable (RE) pin - TTGO T-CAN485
+#define NMEA_BAUD 4800         // Common baud rates: 4800, 9600, 38400
+                                // Most NMEA 0183 wind instruments use 4800 baud
 
 // GPS Configuration
 #define GPS_BAUD 9600

@@ -14,7 +14,10 @@
       "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" device list)",
       "Bash(\"C:\\Users\\akatsaris\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload --upload-port COM4)",
       "Bash(\"C:\\Users\\akatsarios\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload --upload-port COM4)",
-      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" run --target upload --upload-port COM4)"
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" run --target upload --upload-port COM4)",
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" run --target upload --upload-port 192.168.1.188)",
+      "Bash(curl:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

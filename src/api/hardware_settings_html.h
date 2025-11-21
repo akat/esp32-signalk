@@ -21,7 +21,7 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
-    .container { max-width: 900px; margin: 0 auto; }
+    .container { max-width: 1200px; margin: 0 auto; }
 
     .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
     .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
@@ -92,6 +92,28 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
     <div class="card">
       <div class="card-header">
         <div>
+          <h2>Current Settings</h2>
+          <p class="muted">Currently active hardware configuration (after restart).</p>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">RS485 Baud Rate</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-rs485-baud">-</div>
+        </div>
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">GPS Baud Rate</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-gps-baud">-</div>
+        </div>
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">Seatalk1 Baud</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-seatalk-baud">-</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div>
           <h2>Hardware Configuration</h2>
           <p class="muted">Configure GPIO pins and communication parameters for all interfaces.</p>
         </div>
@@ -113,9 +135,9 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
           </div>
           <div class="form-row">
             <div class="form-group"><label>DE Pin</label><input type="number" id="rs485_de" required min="0" max="39"></div>
-            <div class="form-group"><label>DE Enable (0/1)</label><input type="number" id="rs485_de_enable" required min="0" max="1"></div>
+            <div class="form-group"><label>DE Enable Pin</label><input type="number" id="rs485_de_enable" required min="0" max="39"></div>
           </div>
-          <div class="form-group"><label>Baud Rate</label><input type="number" id="rs485_baud" required value="38400"></div>
+          <div class="form-group"><label>Baud Rate</label><input type="number" id="rs485_baud" required value="4800"></div>
         </div>
         <div class="section">
           <h3>Seatalk1</h3>
@@ -141,6 +163,13 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
       try {
         const response = await fetch('/api/settings/hardware');
         const data = await response.json();
+
+        // Update summary cards
+        document.getElementById('current-rs485-baud').textContent = data.rs485.baud;
+        document.getElementById('current-gps-baud').textContent = data.gps.baud;
+        document.getElementById('current-seatalk-baud').textContent = data.seatalk1.baud;
+
+        // Update form fields
         document.getElementById('gps_rx').value = data.gps.rx;
         document.getElementById('gps_tx').value = data.gps.tx;
         document.getElementById('gps_baud').value = data.gps.baud;
