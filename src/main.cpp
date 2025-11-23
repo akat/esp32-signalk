@@ -41,6 +41,7 @@
 #include <Adafruit_BME280.h>
 #include <NMEA2000_CAN.h>
 #include <N2kMessages.h>
+#include <SoftwareSerial.h>
 
 // ====== PROJECT CONFIGURATION ======
 #include "config.h"
@@ -147,6 +148,12 @@ void handleNmeaSentence(const String& sentence, const char* sourceTag) {
 // Serial port buffers
 String gpsBuffer = "";
 String nmeaBuffer = "";
+String singleEndedBuffer = "";
+
+// Single-Ended NMEA 0183 (Direct connection on GPIO 33 via SoftwareSerial)
+#ifdef USE_SINGLEENDED_NMEA
+  SoftwareSerial SingleEndedSerial(SINGLEENDED_NMEA_RX, -1);  // RX only, no TX
+#endif
 
 // NMEA2000 CAN Bus state
 bool n2kEnabled = false;
@@ -504,6 +511,20 @@ void setup() {
     Serial.println("================================\n");
   #endif
 
+  // Initialize Single-Ended NMEA 0183 (Direct connection - not RS485)
+  // Note: Uses SoftwareSerial since all HardwareSerial ports are used (Serial, Serial1=RS485, Serial2=GPS)
+  #ifdef USE_SINGLEENDED_NMEA
+    Serial.println("\n=== Single-Ended NMEA 0183 Input ===");
+    Serial.println("IMPORTANT: GPIO 33 requires voltage divider!");
+    Serial.println("Wiring: NMEA OUT → 10kΩ → GPIO 33 → 3.9kΩ → GND");
+    Serial.println("This converts 12V NMEA signal to safe 3.3V");
+    Serial.println("");
+    SingleEndedSerial.begin(SINGLEENDED_NMEA_BAUD);
+    Serial.printf("Single-Ended NMEA initialized on GPIO %d @ %d baud (SoftwareSerial)\n", SINGLEENDED_NMEA_RX, SINGLEENDED_NMEA_BAUD);
+    Serial.println("Waiting for NMEA sentences (wind, depth, etc.)...");
+    Serial.println("====================================\n");
+  #endif
+
   // Initialize NMEA2000 CAN Bus
   initNMEA2000();
 
@@ -804,6 +825,43 @@ void loop() {
       }
     }
   }
+
+  // Read Single-Ended NMEA data (Direct NMEA 0183 - not RS485)
+  #ifdef USE_SINGLEENDED_NMEA
+    static unsigned long lastSingleEndedActivity = 0;
+    static unsigned long lastSingleEndedReport = 0;
+    static int singleEndedBytesReceived = 0;
+
+    while (SingleEndedSerial.available()) {
+      char c = SingleEndedSerial.read();
+      lastSingleEndedActivity = now;
+      singleEndedBytesReceived++;
+
+      if (c == '\n' || c == '\r') {
+        if (singleEndedBuffer.length() > 6 && singleEndedBuffer[0] == '$') {
+          Serial.printf("Single-Ended RX: %s\n", singleEndedBuffer.c_str());
+          handleNmeaSentence(singleEndedBuffer, "SingleEnded");
+        }
+        singleEndedBuffer = "";
+      } else if (c >= 32 && c <= 126) {
+        if (singleEndedBuffer.length() < 120) {
+          singleEndedBuffer += c;
+        }
+      }
+    }
+
+    // Report Single-Ended NMEA activity status every 10 seconds
+    if (now - lastSingleEndedReport >= 10000) {
+      lastSingleEndedReport = now;
+      if (singleEndedBytesReceived > 0) {
+        Serial.printf("\n[Single-Ended NMEA] Received %d bytes in last 10s\n", singleEndedBytesReceived);
+        singleEndedBytesReceived = 0;
+      } else if (now - lastSingleEndedActivity > 30000) {
+        Serial.println("\n[Single-Ended NMEA] ⚠️ NO DATA for 30+ seconds");
+        Serial.println("  Check: Voltage divider wiring, device power, baud rate");
+      }
+    }
+  #endif
 
   // Process NMEA2000 CAN messages
   if (n2kEnabled) {

@@ -109,6 +109,10 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
           <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">Seatalk1 Baud</div>
           <div style="font-size: 18px; font-weight: 600;" id="current-seatalk-baud">-</div>
         </div>
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">Single-Ended NMEA Baud</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-singleended-baud">-</div>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -147,6 +151,18 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
           </div>
         </div>
         <div class="section">
+          <h3>Single-Ended NMEA 0183 Input</h3>
+          <p class="muted" style="margin-bottom: 12px;">
+            ⚠️ <strong>Voltage Divider Required!</strong> Single-wire NMEA devices output 0-12V and need voltage conversion.<br>
+            <strong>Wiring:</strong> NMEA OUT → 10kΩ → GPIO 33 → 3.9kΩ → GND<br>
+            <strong>Compatible with:</strong> NASA wind instruments, depth sounders, GPS modules with single-wire NMEA output
+          </p>
+          <div class="form-row">
+            <div class="form-group"><label>RX Pin (with voltage divider!)</label><input type="number" id="singleended_rx" required min="0" max="39" value="33"></div>
+            <div class="form-group"><label>Baud Rate</label><input type="number" id="singleended_baud" required value="4800"></div>
+          </div>
+        </div>
+        <div class="section">
           <h3>CAN Bus</h3>
           <div class="form-row">
             <div class="form-group"><label>RX Pin</label><input type="number" id="can_rx" required min="0" max="39"></div>
@@ -168,6 +184,7 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('current-rs485-baud').textContent = data.rs485.baud;
         document.getElementById('current-gps-baud').textContent = data.gps.baud;
         document.getElementById('current-seatalk-baud').textContent = data.seatalk1.baud;
+        document.getElementById('current-singleended-baud').textContent = data.singleended.baud;
 
         // Update form fields
         document.getElementById('gps_rx').value = data.gps.rx;
@@ -180,6 +197,8 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('rs485_baud').value = data.rs485.baud;
         document.getElementById('seatalk1_rx').value = data.seatalk1.rx;
         document.getElementById('seatalk1_baud').value = data.seatalk1.baud;
+        document.getElementById('singleended_rx').value = data.singleended.rx;
+        document.getElementById('singleended_baud').value = data.singleended.baud;
         document.getElementById('can_rx').value = data.can.rx;
         document.getElementById('can_tx').value = data.can.tx;
       } catch (err) {
@@ -207,6 +226,10 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
         seatalk1: {
           rx: parseInt(document.getElementById('seatalk1_rx').value),
           baud: parseInt(document.getElementById('seatalk1_baud').value)
+        },
+        singleended: {
+          rx: parseInt(document.getElementById('singleended_rx').value),
+          baud: parseInt(document.getElementById('singleended_baud').value)
         },
         can: {
           rx: parseInt(document.getElementById('can_rx').value),

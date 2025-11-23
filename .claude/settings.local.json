@@ -17,7 +17,10 @@
       "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" run --target upload --upload-port COM4)",
       "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" run --target upload --upload-port 192.168.1.188)",
       "Bash(curl:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(findstr:*)",
+      "Bash(del /F nul 2)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

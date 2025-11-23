@@ -1800,6 +1800,11 @@ void handleGetHardwareSettings(AsyncWebServerRequest* req) {
   seatalk1["rx"] = hardwareConfig.seatalk1_rx;
   seatalk1["baud"] = hardwareConfig.seatalk1_baud;
 
+  // Single-Ended NMEA settings
+  JsonObject singleended = doc.createNestedObject("singleended");
+  singleended["rx"] = hardwareConfig.singleended_rx;
+  singleended["baud"] = hardwareConfig.singleended_baud;
+
   // CAN settings
   JsonObject can = doc.createNestedObject("can");
   can["rx"] = hardwareConfig.can_rx;
@@ -1848,6 +1853,13 @@ void handleSetHardwareSettings(AsyncWebServerRequest* req, uint8_t *data, size_t
     JsonObject seatalk1 = doc["seatalk1"];
     if (seatalk1.containsKey("rx")) newConfig.seatalk1_rx = seatalk1["rx"];
     if (seatalk1.containsKey("baud")) newConfig.seatalk1_baud = seatalk1["baud"];
+  }
+
+  // Single-Ended NMEA settings
+  if (doc.containsKey("singleended")) {
+    JsonObject singleended = doc["singleended"];
+    if (singleended.containsKey("rx")) newConfig.singleended_rx = singleended["rx"];
+    if (singleended.containsKey("baud")) newConfig.singleended_baud = singleended["baud"];
   }
 
   // CAN settings
