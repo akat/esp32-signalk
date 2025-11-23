@@ -27,7 +27,7 @@
 #define SINGLEENDED_NMEA_BAUD 4800    // Common: 4800 baud (configurable via web UI)
 
 // GPS Configuration
-#define GPS_BAUD 9600
+#define GPS_BAUD 4800   // Try 4800 if 9600 doesn't work (some NEO-6M use 4800)
 #define GPS_RX 25
 #define GPS_TX 18
 

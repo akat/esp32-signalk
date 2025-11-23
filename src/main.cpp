@@ -496,8 +496,9 @@ void setup() {
 
   // GPS Module (Serial2)
   Serial.println("Starting GPS module...");
-  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
-  Serial.println("GPS UART started on pins RX:" + String(GPS_RX) + " TX:" + String(GPS_TX));
+  Serial2.begin(hardwareConfig.gps_baud, SERIAL_8N1, hardwareConfig.gps_rx, hardwareConfig.gps_tx);
+  Serial.printf("GPS UART started on pins RX:%d TX:%d @ %d baud\n",
+    hardwareConfig.gps_rx, hardwareConfig.gps_tx, hardwareConfig.gps_baud);
 
   // Initialize Seatalk 1 (if enabled)
   #ifdef USE_SEATALK1
@@ -811,11 +812,18 @@ void loop() {
   }
 
   // Read GPS data from Serial2
+  static unsigned long lastGPSActivity = 0;
+  static unsigned long lastGPSReport = 0;
+  static int gpsBytesReceived = 0;
+
   while (Serial2.available()) {
     char c = Serial2.read();
+    lastGPSActivity = now;
+    gpsBytesReceived++;
 
       if (c == '\n' || c == '\r') {
         if (gpsBuffer.length() > 6 && gpsBuffer[0] == '$') {
+          Serial.printf("GPS RX: %s\n", gpsBuffer.c_str());
           handleNmeaSentence(gpsBuffer, nullptr);  // GPS modules send NMEA 0183
         }
         gpsBuffer = "";
@@ -823,6 +831,18 @@ void loop() {
       if (gpsBuffer.length() < 120) {
         gpsBuffer += c;
       }
+    }
+  }
+
+  // Report GPS activity status every 10 seconds
+  if (now - lastGPSReport >= 10000) {
+    lastGPSReport = now;
+    if (gpsBytesReceived > 0) {
+      Serial.printf("\n[GPS] Received %d bytes in last 10s\n", gpsBytesReceived);
+      gpsBytesReceived = 0;
+    } else if (now - lastGPSActivity > 30000) {
+      Serial.println("\n[GPS] ⚠️ NO DATA for 30+ seconds");
+      Serial.println("  Check: GPS wiring (TX→GPIO25), baud rate (9600), satellite fix");
     }
   }
 
