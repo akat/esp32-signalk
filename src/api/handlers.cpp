@@ -245,6 +245,16 @@ const char* HTML_UI = R"html(
             if (update.values) {
               update.values.forEach(item => {
                 const path = item.path;
+                if (!path || typeof path !== 'string') {
+                  console.warn('Skipping item with invalid path:', item);
+                  return;
+                }
+
+                if (item.value === undefined || item.value === null) {
+                  console.warn('Skipping item with missing value:', item);
+                  return;
+                }
+
                 let value = item.value;
 
                 if (typeof value === 'number') {
@@ -273,7 +283,9 @@ const char* HTML_UI = R"html(
     function renderTable() {
       tbody.innerHTML = '';
 
-      const sortedPaths = Array.from(paths.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+      const sortedPaths = Array.from(paths.entries())
+        .filter(([path]) => path && typeof path === 'string')
+        .sort((a, b) => a[0].localeCompare(b[0]));
 
       sortedPaths.forEach(([path, data]) => {
         const tr = document.createElement('tr');
@@ -331,7 +343,7 @@ const char* HTML_CONFIG = R"html(
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
-    .container { max-width: 800px; margin: 0 auto; }
+    .container { max-width: 1200px; margin: 0 auto; }
 
     .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
     .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
@@ -346,6 +358,7 @@ const char* HTML_CONFIG = R"html(
     .btn-link.secondary { color: #fff; }
     .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
 
+    h2 { font-size: 20px; margin-bottom: 6px; }
     .muted { color: var(--muted); font-size: 14px; }
     .subtle-card { background: #eef4ff; border: 1px solid #dbe4ff; color: var(--muted); }
 
@@ -686,6 +699,7 @@ const char* HTML_ADMIN = R"html(
       --bg: #f5f7fb;
       --card-bg: #ffffff;
       --primary: #1f7afc;
+      --primary-dark: #1554c0;
       --text: #1f2a37;
       --muted: #5d6b82;
       --border: #e4e7ec;
@@ -693,7 +707,7 @@ const char* HTML_ADMIN = R"html(
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
-    .container { max-width: 1000px; margin: 0 auto; }
+    .container { max-width: 1200px; margin: 0 auto; }
 
     .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
     .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
@@ -708,9 +722,12 @@ const char* HTML_ADMIN = R"html(
     .btn-link.secondary { color: #fff; }
     .btn-link:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
 
+    h2 { font-size: 20px; margin-bottom: 6px; }
+    .muted { color: var(--muted); font-size: 14px; }
     .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
     .card-header span { color: var(--muted); font-size: 13px; }
 
+    code { background: #f0f4ff; padding: 6px 10px; border-radius: 8px; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; display: inline-block; width: 100%; word-break: break-all; }
     .table-wrapper { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
     table { width: 100%; border-collapse: collapse; min-width: 520px; }
     th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: top; }
@@ -1378,7 +1395,11 @@ void handlePutPath(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t
 // ====== WEB UI HANDLERS ======
 
 void handleRoot(AsyncWebServerRequest* req) {
-  req->send(200, "text/html", HTML_UI);
+  AsyncWebServerResponse* response = req->beginResponse(200, "text/html", HTML_UI);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  response->addHeader("Pragma", "no-cache");
+  response->addHeader("Expires", "0");
+  req->send(response);
 }
 
 void handleConfig(AsyncWebServerRequest* req) {
@@ -1779,6 +1800,11 @@ void handleGetHardwareSettings(AsyncWebServerRequest* req) {
   seatalk1["rx"] = hardwareConfig.seatalk1_rx;
   seatalk1["baud"] = hardwareConfig.seatalk1_baud;
 
+  // Single-Ended NMEA settings
+  JsonObject singleended = doc.createNestedObject("singleended");
+  singleended["rx"] = hardwareConfig.singleended_rx;
+  singleended["baud"] = hardwareConfig.singleended_baud;
+
   // CAN settings
   JsonObject can = doc.createNestedObject("can");
   can["rx"] = hardwareConfig.can_rx;
@@ -1827,6 +1853,13 @@ void handleSetHardwareSettings(AsyncWebServerRequest* req, uint8_t *data, size_t
     JsonObject seatalk1 = doc["seatalk1"];
     if (seatalk1.containsKey("rx")) newConfig.seatalk1_rx = seatalk1["rx"];
     if (seatalk1.containsKey("baud")) newConfig.seatalk1_baud = seatalk1["baud"];
+  }
+
+  // Single-Ended NMEA settings
+  if (doc.containsKey("singleended")) {
+    JsonObject singleended = doc["singleended"];
+    if (singleended.containsKey("rx")) newConfig.singleended_rx = singleended["rx"];
+    if (singleended.containsKey("baud")) newConfig.singleended_baud = singleended["baud"];
   }
 
   // CAN settings
@@ -1905,4 +1938,3 @@ void handleAPSettingsPage(AsyncWebServerRequest* req) {
 }
 
 // ====== WIFI RESET HANDLER ======
-

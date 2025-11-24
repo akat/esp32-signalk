@@ -7,17 +7,27 @@
 #define CAN_RX_PIN GPIO_NUM_26
 #define CAN_SE_PIN GPIO_NUM_23  // Silent/Enable pin
 
-// NMEA0183 Configuration (TTGO T-CAN485 default RS485 pins)
+// NMEA0183 RS485 Configuration (TTGO T-CAN485 default RS485 pins)
+// RS485 accepts DIFFERENTIAL NMEA 0183 devices (2 wires: A and B terminals)
+// Examples: depth sounders, differential wind sensors with RS-422 output
 #define USE_RS485_FOR_NMEA     // Enable RS485 transceiver for depth sounder
 #define NMEA_RX 21
 #define NMEA_TX 22
-#define NMEA_DE 17
-#define NMEA_DE_ENABLE 19
-#define NMEA_BAUD 9600         // Common baud rates: 4800, 9600, 38400
-                                // If depth sounder not working, try changing to 9600
+#define NMEA_DE 19             // Direction Enable (DE) pin - TTGO T-CAN485
+#define NMEA_DE_ENABLE 17      // Receiver Enable (RE) pin - TTGO T-CAN485
+#define NMEA_BAUD 4800         // Common baud rates: 4800, 9600, 38400
+                                // Most NMEA 0183 devices use 4800 baud
+
+// Single-Ended NMEA 0183 Input (Direct connection - not RS485)
+// For SINGLE-WIRE NMEA 0183 devices (e.g., NASA wind, depth sounders, GPS modules)
+// IMPORTANT: Requires voltage divider (12V → 3.3V) - use 10kΩ + 3.9kΩ resistors
+// Wiring: NMEA OUT → 10kΩ → GPIO 33 → 3.9kΩ → GND
+#define USE_SINGLEENDED_NMEA          // Enable single-ended NMEA input
+#define SINGLEENDED_NMEA_RX 33        // GPIO 33 (with voltage divider!)
+#define SINGLEENDED_NMEA_BAUD 4800    // Common: 4800 baud (configurable via web UI)
 
 // GPS Configuration
-#define GPS_BAUD 9600
+#define GPS_BAUD 4800   // Try 4800 if 9600 doesn't work (some NEO-6M use 4800)
 #define GPS_RX 25
 #define GPS_TX 18
 

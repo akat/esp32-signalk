@@ -58,6 +58,10 @@ struct HardwareConfig {
   int seatalk1_rx;
   int seatalk1_baud;
 
+  // Single-Ended NMEA 0183 (Direct connection)
+  int singleended_rx;
+  int singleended_baud;
+
   // CAN
   int can_rx;
   int can_tx;

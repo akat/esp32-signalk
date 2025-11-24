@@ -245,6 +245,12 @@ static String normalizeAnchorConfig(const String& jsonValue) {
 
 void setPathValue(const String& path, double value, const String& source,
                   const String& units, const String& description) {
+  // Validate path
+  if (path.length() == 0) {
+    Serial.println("ERROR: setPathValue called with empty path (double)");
+    return;
+  }
+
   if (handleAnchorPartialUpdate(path, true, value, "", source, units, description)) {
     return;
   }
@@ -263,6 +269,12 @@ void setPathValue(const String& path, double value, const String& source,
 
 void setPathValue(const String& path, const String& value, const String& source,
                   const String& units, const String& description) {
+  // Validate path
+  if (path.length() == 0) {
+    Serial.println("ERROR: setPathValue called with empty path (string)");
+    return;
+  }
+
   if (handleAnchorPartialUpdate(path, false, 0.0, value, source, units, description)) {
     return;
   }
@@ -327,6 +339,12 @@ void flushAnchorPersist() {
 
 void setPathValueJson(const String& path, const String& jsonValue, const String& source,
                       const String& units, const String& description) {
+  // Validate path
+  if (path.length() == 0) {
+    Serial.println("ERROR: setPathValueJson called with empty path");
+    return;
+  }
+
   String normalized = jsonValue;
   if (path == "navigation.anchor.akat") {
     normalized = normalizeAnchorConfig(jsonValue);

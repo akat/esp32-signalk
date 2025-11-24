@@ -20,11 +20,15 @@ This firmware now supports **simultaneous Seatalk1 and GPS** with **ZERO conflic
 │     ├─ GPIO 17: DE control                     │
 │     └─ GPIO 19: DE_ENABLE                      │
 │                                                │
-│  🟢 GPS Module (Serial2)                       │
+│  🟢 Single-Ended NMEA (UART2) ⭐ NEW!          │
+│     ├─ GPIO 33: Single-Ended NMEA RX           │
+│     └─ Hardware inverted for optocouplers      │
+│                                                │
+│  🟢 GPS Module (SoftwareSerial)                │
 │     ├─ GPIO 25: GPS RX                         │
 │     └─ GPIO 18: GPS TX                         │
 │                                                │
-│  🟡 Seatalk1 (SoftwareSerial) ⭐ NEW!          │
+│  🟡 Seatalk1 (SoftwareSerial)                  │
 │     └─ GPIO 32: Seatalk RX (inverted)          │
 │                                                │
 │  🔵 I2C Sensors (Optional)                     │
@@ -39,15 +43,15 @@ This firmware now supports **simultaneous Seatalk1 and GPS** with **ZERO conflic
 
 ## What Changed?
 
-### ✅ SoftwareSerial for Seatalk1
+### ✅ Universal NMEA Support - All Peripherals Simultaneously
 
-**Before:**
-- Seatalk1 used **Serial1** → ⚠️ Conflict with RS485 depth sounder
+**Current Configuration:**
+- **RS485** uses **UART1 (Serial1)** → Depth sounders, AIS, etc.
+- **Single-Ended NMEA** uses **UART2 (HardwareSerial)** → Wind instruments with optocoupler support
+- **GPS** uses **SoftwareSerial** → Position data
+- **Seatalk1** uses **SoftwareSerial on GPIO 32** → Raymarine instruments
 
-**After:**
-- Seatalk1 uses **SoftwareSerial on GPIO 32** → ✅ No conflicts!
-- RS485 depth sounder keeps Serial1
-- GPS keeps Serial2
+**✅ Result:** ALL peripherals work simultaneously with ZERO conflicts!
 
 ## Enabling Seatalk1
 

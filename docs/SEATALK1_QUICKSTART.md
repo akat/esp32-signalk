@@ -18,8 +18,10 @@ Ground ─────────────┴──────────�
 Edit `src/config.h`:
 ```cpp
 #define USE_SEATALK1           // Uncomment this line
-#define SEATALK1_RX 32         // GPIO pin
-#define SEATALK1_SERIAL 2      // Use Serial2 (if GPS not connected)
+#define SEATALK1_RX 32         // GPIO pin for SoftwareSerial
+#define SEATALK1_BAUD 4800     // Seatalk baud rate
+
+Note: Seatalk1 uses SoftwareSerial - no conflicts with RS485, GPS, or Single-Ended NMEA!
 ```
 
 ### 3. Build & Upload

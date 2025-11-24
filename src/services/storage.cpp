@@ -187,6 +187,15 @@ void loadHardwareConfig() {
   hardwareConfig.seatalk1_baud = prefs.getInt("st1_baud", 4800);
 #endif
 
+  // Load Single-Ended NMEA settings
+#ifdef USE_SINGLEENDED_NMEA
+  hardwareConfig.singleended_rx = prefs.getInt("se_rx", SINGLEENDED_NMEA_RX);
+  hardwareConfig.singleended_baud = prefs.getInt("se_baud", SINGLEENDED_NMEA_BAUD);
+#else
+  hardwareConfig.singleended_rx = prefs.getInt("se_rx", 33);
+  hardwareConfig.singleended_baud = prefs.getInt("se_baud", 4800);
+#endif
+
   // Load CAN settings
   hardwareConfig.can_rx = prefs.getInt("can_rx", CAN_RX_PIN);
   hardwareConfig.can_tx = prefs.getInt("can_tx", CAN_TX_PIN);
@@ -199,6 +208,7 @@ void loadHardwareConfig() {
     hardwareConfig.rs485_rx, hardwareConfig.rs485_tx, hardwareConfig.rs485_de,
     hardwareConfig.rs485_de_enable, hardwareConfig.rs485_baud);
   Serial.printf("Seatalk1: RX=%d, Baud=%d\n", hardwareConfig.seatalk1_rx, hardwareConfig.seatalk1_baud);
+  Serial.printf("Single-Ended NMEA: RX=%d, Baud=%d\n", hardwareConfig.singleended_rx, hardwareConfig.singleended_baud);
   Serial.printf("CAN: RX=%d, TX=%d\n", hardwareConfig.can_rx, hardwareConfig.can_tx);
   Serial.println("=====================================\n");
 }
@@ -222,6 +232,10 @@ void saveHardwareConfig(const HardwareConfig& config) {
   prefs.putInt("st1_rx", config.seatalk1_rx);
   prefs.putInt("st1_baud", config.seatalk1_baud);
 
+  // Save Single-Ended NMEA settings
+  prefs.putInt("se_rx", config.singleended_rx);
+  prefs.putInt("se_baud", config.singleended_baud);
+
   // Save CAN settings
   prefs.putInt("can_rx", config.can_rx);
   prefs.putInt("can_tx", config.can_tx);
@@ -236,6 +250,7 @@ void saveHardwareConfig(const HardwareConfig& config) {
     config.rs485_rx, config.rs485_tx, config.rs485_de,
     config.rs485_de_enable, config.rs485_baud);
   Serial.printf("Seatalk1: RX=%d, Baud=%d\n", config.seatalk1_rx, config.seatalk1_baud);
+  Serial.printf("Single-Ended NMEA: RX=%d, Baud=%d\n", config.singleended_rx, config.singleended_baud);
   Serial.printf("CAN: RX=%d, TX=%d\n", config.can_rx, config.can_tx);
   Serial.println("====================================\n");
 }

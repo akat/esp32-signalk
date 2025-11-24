@@ -21,7 +21,7 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45; }
-    .container { max-width: 900px; margin: 0 auto; }
+    .container { max-width: 1200px; margin: 0 auto; }
 
     .card { background: var(--card-bg); border-radius: 18px; padding: 24px; margin-bottom: 24px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }
     .hero-card { background: linear-gradient(135deg, #1f7afc, #6c5ce7); color: #fff; border: none; }
@@ -92,6 +92,32 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
     <div class="card">
       <div class="card-header">
         <div>
+          <h2>Current Settings</h2>
+          <p class="muted">Currently active hardware configuration (after restart).</p>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">RS485 Baud Rate</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-rs485-baud">-</div>
+        </div>
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">GPS Baud Rate</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-gps-baud">-</div>
+        </div>
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">Seatalk1 Baud</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-seatalk-baud">-</div>
+        </div>
+        <div style="background: #f8f9ff; border: 1px solid #e0e7ff; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;">Single-Ended NMEA Baud</div>
+          <div style="font-size: 18px; font-weight: 600;" id="current-singleended-baud">-</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div>
           <h2>Hardware Configuration</h2>
           <p class="muted">Configure GPIO pins and communication parameters for all interfaces.</p>
         </div>
@@ -113,15 +139,27 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
           </div>
           <div class="form-row">
             <div class="form-group"><label>DE Pin</label><input type="number" id="rs485_de" required min="0" max="39"></div>
-            <div class="form-group"><label>DE Enable (0/1)</label><input type="number" id="rs485_de_enable" required min="0" max="1"></div>
+            <div class="form-group"><label>DE Enable Pin</label><input type="number" id="rs485_de_enable" required min="0" max="39"></div>
           </div>
-          <div class="form-group"><label>Baud Rate</label><input type="number" id="rs485_baud" required value="38400"></div>
+          <div class="form-group"><label>Baud Rate</label><input type="number" id="rs485_baud" required value="4800"></div>
         </div>
         <div class="section">
           <h3>Seatalk1</h3>
           <div class="form-row">
             <div class="form-group"><label>RX Pin</label><input type="number" id="seatalk1_rx" required min="0" max="39"></div>
             <div class="form-group"><label>Baud Rate</label><input type="number" id="seatalk1_baud" required value="4800"></div>
+          </div>
+        </div>
+        <div class="section">
+          <h3>Single-Ended NMEA 0183 Input</h3>
+          <p class="muted" style="margin-bottom: 12px;">
+            ⚠️ <strong>Voltage Divider Required!</strong> Single-wire NMEA devices output 0-12V and need voltage conversion.<br>
+            <strong>Wiring:</strong> NMEA OUT → 10kΩ → GPIO 33 → 3.9kΩ → GND<br>
+            <strong>Compatible with:</strong> NASA wind instruments, depth sounders, GPS modules with single-wire NMEA output
+          </p>
+          <div class="form-row">
+            <div class="form-group"><label>RX Pin (with voltage divider!)</label><input type="number" id="singleended_rx" required min="0" max="39" value="33"></div>
+            <div class="form-group"><label>Baud Rate</label><input type="number" id="singleended_baud" required value="4800"></div>
           </div>
         </div>
         <div class="section">
@@ -141,6 +179,14 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
       try {
         const response = await fetch('/api/settings/hardware');
         const data = await response.json();
+
+        // Update summary cards
+        document.getElementById('current-rs485-baud').textContent = data.rs485.baud;
+        document.getElementById('current-gps-baud').textContent = data.gps.baud;
+        document.getElementById('current-seatalk-baud').textContent = data.seatalk1.baud;
+        document.getElementById('current-singleended-baud').textContent = data.singleended.baud;
+
+        // Update form fields
         document.getElementById('gps_rx').value = data.gps.rx;
         document.getElementById('gps_tx').value = data.gps.tx;
         document.getElementById('gps_baud').value = data.gps.baud;
@@ -151,6 +197,8 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('rs485_baud').value = data.rs485.baud;
         document.getElementById('seatalk1_rx').value = data.seatalk1.rx;
         document.getElementById('seatalk1_baud').value = data.seatalk1.baud;
+        document.getElementById('singleended_rx').value = data.singleended.rx;
+        document.getElementById('singleended_baud').value = data.singleended.baud;
         document.getElementById('can_rx').value = data.can.rx;
         document.getElementById('can_tx').value = data.can.tx;
       } catch (err) {
@@ -178,6 +226,10 @@ const char HARDWARE_SETTINGS_HTML[] PROGMEM = R"rawliteral(
         seatalk1: {
           rx: parseInt(document.getElementById('seatalk1_rx').value),
           baud: parseInt(document.getElementById('seatalk1_baud').value)
+        },
+        singleended: {
+          rx: parseInt(document.getElementById('singleended_rx').value),
+          baud: parseInt(document.getElementById('singleended_baud').value)
         },
         can: {
           rx: parseInt(document.getElementById('can_rx').value),
