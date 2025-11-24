@@ -42,6 +42,7 @@
 #include <NMEA2000_CAN.h>
 #include <N2kMessages.h>
 #include <SoftwareSerial.h>
+#include <driver/uart.h>  // ESP32 native UART driver for inverted mode support
 
 // ====== PROJECT CONFIGURATION ======
 #include "config.h"
@@ -150,9 +151,16 @@ String gpsBuffer = "";
 String nmeaBuffer = "";
 String singleEndedBuffer = "";
 
-// Single-Ended NMEA 0183 (Direct connection on GPIO 33 via SoftwareSerial)
+// GPS on SoftwareSerial (moved from UART2 to allow Single-Ended NMEA to use UART2)
+#include <SoftwareSerial.h>
+SoftwareSerial gpsSerial;
+
+// Single-Ended NMEA 0183 (Direct connection with inverted mode support for optocouplers)
 #ifdef USE_SINGLEENDED_NMEA
-  SoftwareSerial SingleEndedSerial(SINGLEENDED_NMEA_RX, -1);  // RX only, no TX
+  // Using HardwareSerial with inverted RX mode (native ESP32 UART feature)
+  // Uses UART2 (GPS moved to SoftwareSerial to free up UART2)
+  HardwareSerial SingleEndedSerial(2);  // Use UART2 (independent from RS485)
+  bool singleEndedUseInverted = true;  // Enable inverted mode for optocoupler
 #endif
 
 // NMEA2000 CAN Bus state
@@ -494,11 +502,13 @@ void setup() {
     Serial.println("NMEA0183 UART started on GPIO header pins RX:" + String(NMEA_RX) + " TX:" + String(NMEA_TX));
   #endif
 
-  // GPS Module (Serial2)
+  // GPS Module (SoftwareSerial)
+  // NOTE: GPS moved from UART2 to SoftwareSerial to allow Single-Ended NMEA to use UART2
   Serial.println("Starting GPS module...");
-  Serial2.begin(hardwareConfig.gps_baud, SERIAL_8N1, hardwareConfig.gps_rx, hardwareConfig.gps_tx);
-  Serial.printf("GPS UART started on pins RX:%d TX:%d @ %d baud\n",
+  gpsSerial.begin(hardwareConfig.gps_baud, SWSERIAL_8N1, hardwareConfig.gps_rx, hardwareConfig.gps_tx, false, 256);
+  Serial.printf("GPS SoftwareSerial started on pins RX:%d TX:%d @ %d baud\n",
     hardwareConfig.gps_rx, hardwareConfig.gps_tx, hardwareConfig.gps_baud);
+  Serial.println("Note: GPS now uses SoftwareSerial (UART2 reserved for Single-Ended NMEA)");
 
   // Initialize Seatalk 1 (if enabled)
   #ifdef USE_SEATALK1
@@ -513,15 +523,24 @@ void setup() {
   #endif
 
   // Initialize Single-Ended NMEA 0183 (Direct connection - not RS485)
-  // Note: Uses SoftwareSerial since all HardwareSerial ports are used (Serial, Serial1=RS485, Serial2=GPS)
   #ifdef USE_SINGLEENDED_NMEA
     Serial.println("\n=== Single-Ended NMEA 0183 Input ===");
-    Serial.println("IMPORTANT: GPIO 33 requires voltage divider!");
+    Serial.println("IMPORTANT: GPIO 33 requires voltage divider OR optocoupler isolation");
     Serial.println("Wiring: NMEA OUT → 10kΩ → GPIO 33 → 3.9kΩ → GND");
+    Serial.println("        OR: NMEA OUT → Optocoupler → GPIO 33");
     Serial.println("This converts 12V NMEA signal to safe 3.3V");
     Serial.println("");
-    SingleEndedSerial.begin(SINGLEENDED_NMEA_BAUD);
-    Serial.printf("Single-Ended NMEA initialized on GPIO %d @ %d baud (SoftwareSerial)\n", SINGLEENDED_NMEA_RX, SINGLEENDED_NMEA_BAUD);
+
+    // Initialize HardwareSerial with custom RX pin and inverted mode
+    // This allows using optocouplers without hardware inverter
+    SingleEndedSerial.begin(hardwareConfig.singleended_baud, SERIAL_8N1,
+                            hardwareConfig.singleended_rx, -1,  // RX only, no TX
+                            singleEndedUseInverted);  // Enable inverted RX mode
+
+    Serial.printf("Single-Ended NMEA initialized on GPIO %d @ %d baud (UART2)\n",
+                  hardwareConfig.singleended_rx, hardwareConfig.singleended_baud);
+    Serial.println("Mode: Hardware RX inversion enabled for optocoupler compatibility");
+    Serial.println("✅ All peripherals active: RS485 (UART1) + Single-Ended (UART2) + GPS (SoftwareSerial)");
     Serial.println("Waiting for NMEA sentences (wind, depth, etc.)...");
     Serial.println("====================================\n");
   #endif
@@ -811,13 +830,14 @@ void loop() {
     }
   }
 
-  // Read GPS data from Serial2
+  // Read GPS data from SoftwareSerial
+  // NOTE: GPS now uses SoftwareSerial (UART2 reserved for Single-Ended NMEA)
   static unsigned long lastGPSActivity = 0;
   static unsigned long lastGPSReport = 0;
   static int gpsBytesReceived = 0;
 
-  while (Serial2.available()) {
-    char c = Serial2.read();
+  while (gpsSerial.available()) {
+    char c = gpsSerial.read();
     lastGPSActivity = now;
     gpsBytesReceived++;
 
@@ -851,11 +871,19 @@ void loop() {
     static unsigned long lastSingleEndedActivity = 0;
     static unsigned long lastSingleEndedReport = 0;
     static int singleEndedBytesReceived = 0;
+    static bool debugRawBytes = true;  // Set to true to debug inverted signal issues
 
     while (SingleEndedSerial.available()) {
       char c = SingleEndedSerial.read();
       lastSingleEndedActivity = now;
       singleEndedBytesReceived++;
+
+      // Hardware UART handles inversion automatically - no software processing needed!
+
+      // Debug: Print first 20 raw bytes to verify correct reception
+      if (debugRawBytes && singleEndedBytesReceived <= 20) {
+        Serial.printf("Raw byte: 0x%02X ('%c') [hw-inverted]\n", (unsigned char)c, (c >= 32 && c <= 126) ? c : '.');
+      }
 
       if (c == '\n' || c == '\r') {
         if (singleEndedBuffer.length() > 6 && singleEndedBuffer[0] == '$') {
@@ -878,7 +906,8 @@ void loop() {
         singleEndedBytesReceived = 0;
       } else if (now - lastSingleEndedActivity > 30000) {
         Serial.println("\n[Single-Ended NMEA] ⚠️ NO DATA for 30+ seconds");
-        Serial.println("  Check: Voltage divider wiring, device power, baud rate");
+        Serial.println("  Check: Voltage divider/optocoupler wiring, device power, baud rate");
+        Serial.println("  If using optocoupler: signal may be inverted (need hardware inverter)");
       }
     }
   #endif

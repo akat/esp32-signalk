@@ -303,20 +303,33 @@ $IIMWV,045,R,12.5,N,A*2E  (Relative wind: 45° at 12.5 knots)
 
 ## Technical Notes
 
-### Why SoftwareSerial?
+### UART Allocation
 
-The ESP32 has 3 hardware UART ports, all currently in use:
+The ESP32 has 3 hardware UART ports:
 - **Serial** (UART0): Debug/programming (115200 baud)
 - **Serial1** (UART1): RS485 NMEA (GPIO 21/22)
-- **Serial2** (UART2): GPS module (GPIO 25/18)
+- **Serial2** (UART2): Single-Ended NMEA (GPIO 33) **with hardware signal inversion**
 
-Therefore, Single-Ended NMEA uses **SoftwareSerial** on GPIO 33.
+**All peripherals can operate simultaneously:**
+- ✅ **RS485** (UART1) - Depth sounder, AIS, etc.
+- ✅ **Single-Ended NMEA** (UART2) - Wind instruments with optocoupler
+- ✅ **GPS** (SoftwareSerial) - GPS module on GPIO 25/18
+- ✅ **Seatalk1** (SoftwareSerial) - Raymarine instruments on GPIO 32
+
+### Hardware Signal Inversion for Optocouplers
+
+Single-Ended NMEA uses ESP32's native hardware UART inversion feature:
+- **Inverted RX mode enabled** - compatible with optocoupler isolation
+- No external inverter hardware needed
+- Plug-and-play support for optocoupler-isolated devices
+- More reliable than software bit flipping
 
 ### Performance Considerations
 
-- **Max baud rate**: 38400 (SoftwareSerial limitation)
+- **Max baud rate**: 115200 (HardwareSerial limitation)
 - **Buffer size**: 120 characters (sufficient for NMEA)
-- **Update rate**: Checked every loop iteration (~1ms)
+- **Signal inversion**: Hardware-based (no CPU overhead)
+- **Reliability**: High (native UART handling)
 
 ## API Access
 

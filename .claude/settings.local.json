@@ -20,7 +20,10 @@
       "Bash(python:*)",
       "Bash(findstr:*)",
       "Bash(del /F nul 2)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(del /F /Q .piobuildesp32devsrc*.o 2)",
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor:*)",
+      "Bash(del /F /Q nul)"
     ],
     "deny": [],
     "ask": []
