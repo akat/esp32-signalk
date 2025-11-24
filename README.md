@@ -43,20 +43,34 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 - **Baud**: 4800 bps (standard marine) or 38400 bps (high-speed)
 - **📖 See [RS485-GUIDE.md](RS485-GUIDE.md) for RS485 terminal block usage**
 
-#### 3. GPS Module (NMEA 0183 via UART)
-- **Connection**: Dedicated Serial2 on GPIO 25 (RX) / 18 (TX)
+#### 3. Single-Ended NMEA 0183 (Direct Connection with Optocoupler Support) ⭐ NEW!
+- **Hardware**: UART2 with hardware signal inversion on GPIO 33
+- **Connection**: Direct NMEA 0183 output with optocoupler isolation
+- **Supports**: Wind instruments (NASA Wireless Wind, etc.), depth sounders, any single-wire NMEA device
+- **Baud**: 4800 bps (configurable)
+- **Features**:
+  - Hardware RX inversion for optocoupler compatibility (plug-and-play)
+  - No external inverter circuit needed
+  - Galvanic isolation via optocoupler
+- **⚠️ IMPORTANT**: Requires optocoupler isolation or voltage divider (12V → 3.3V)
+- **📖 See [docs/SINGLE_ENDED_NMEA.md](docs/SINGLE_ENDED_NMEA.md) for complete setup guide**
+- **📖 See [docs/VOLTAGE_DIVIDER_CIRCUIT.md](docs/VOLTAGE_DIVIDER_CIRCUIT.md) for voltage divider option**
+
+#### 4. GPS Module (NMEA 0183 via SoftwareSerial)
+- **Connection**: SoftwareSerial on GPIO 25 (RX) / 18 (TX)
 - **Supports**: Standard GPS modules (NEO-6M, NEO-M8N, etc.)
 - **Sentences**: GGA, RMC, VTG, HDT
 - **Baud**: 9600 bps (configurable)
 - **Automatic**: Position, speed, and course updates
+- **Note**: Moved to SoftwareSerial to allow Single-Ended NMEA to use UART2
 
-#### 4. I2C Environmental Sensors
+#### 5. I2C Environmental Sensors
 - **Hardware**: I2C bus on GPIO 5 (SDA) / 34 (SCL)
 - **BME280**: Temperature, Barometric Pressure, Humidity
 - **Auto-detection**: Addresses 0x76 and 0x77
 - **Use Case**: Inside cabin environmental monitoring
 
-#### 5. Seatalk 1 (Raymarine Legacy Protocol) ⭐ NEW: SoftwareSerial!
+#### 6. Seatalk 1 (Raymarine Legacy Protocol) ⭐ SoftwareSerial!
 - **Hardware**: Requires opto-isolated level shifter (12V → 3.3V)
 - **Connection**: GPIO 32 via level shifter (SoftwareSerial - no conflicts!)
 - **Protocol**: 4800 baud, 9-bit, inverted serial
@@ -141,15 +155,21 @@ A complete marine data acquisition and distribution system based on ESP32, desig
 │  ├─ TX:    GPIO 33  (Pin 4)             │
 │  └─ Use:   When RS485 not needed        │
 │                                         │
-│  📍 GPS Module (Serial2)                │
+│  📍 Single-Ended NMEA (UART2) ⭐ NEW!  │
+│  ├─ RX:    GPIO 33  (Pin 4)             │
+│  ├─ Mode:  Hardware inverted RX         │
+│  └─ Note:  Optocoupler compatible       │
+│            Plug-and-play isolation!     │
+│                                         │
+│  📍 GPS Module (SoftwareSerial)         │
 │  ├─ RX:    GPIO 25  (Pin 5)             │
 │  ├─ TX:    GPIO 18  (Pin 6)             │
 │  └─ Power: 3.3V (Pin 1), GND (Pin 2)    │
 │                                         │
-│  📍 Seatalk1 (SoftwareSerial) ⭐        │
+│  📍 Seatalk1 (SoftwareSerial)           │
 │  ├─ RX:    GPIO 32  (Pin 3)             │
-│  └─ Note:  Uses SoftwareSerial          │
-│            No conflict with RS485/GPS!  │
+│  └─ Note:  Opto-isolated level shifter  │
+│            12V → 3.3V required!         │
 │                                         │
 │  📍 I2C Sensors                         │
 │  ├─ SDA:   GPIO 5   (Pin 7)             │
@@ -233,6 +253,26 @@ Marine Instrument          T-CAN485
 
 **📖 Full details in [RS485-GUIDE.md](RS485-GUIDE.md)**
 
+### Single-Ended NMEA Connection (GPIO Header) ⭐ NEW!
+
+```
+NASA Wind / NMEA Device        T-CAN485 GPIO Header
+┌─────────────┐
+│ NMEA Device │
+│             │
+│ NMEA OUT ●──┼───┐
+│             │   │  Optocoupler (PC817 or similar)
+│ GND      ●──┼───┼──────────────→ GND (Pin 2)
+│             │   │
+└─────────────┘   │
+                  └──→ [Optocoupler] ──→ GPIO 33 (Pin 4) - RX
+
+Hardware RX Inversion: Enabled (native ESP32 UART feature)
+Plug-and-Play: Works with optocouplers without external inverter
+```
+
+**📖 See [docs/SINGLE_ENDED_NMEA.md](docs/SINGLE_ENDED_NMEA.md) for detailed wiring diagrams**
+
 ### GPS Module Connection (GPIO Header)
 
 ```
@@ -242,10 +282,12 @@ GPS Module (NEO-6M/NEO-M8N)    T-CAN485 GPIO Header
 │             │
 │  VCC ●──────┼──────────────→ 3.3V (Pin 1)
 │  GND ●──────┼──────────────→ GND  (Pin 2)
-│  TX  ●──────┼──────────────→ GPIO 25 (Pin 5) - RX
+│  TX  ●──────┼──────────────→ GPIO 25 (Pin 5) - RX (SoftwareSerial)
 │  RX  ●──────┼──────────────→ GPIO 18 (Pin 6) - TX [Optional]
 │             │
 └─────────────┘
+
+Note: GPS now uses SoftwareSerial (UART2 reserved for Single-Ended NMEA)
 ```
 
 ### BME280 Sensor Connection (GPIO Header)
@@ -291,12 +333,15 @@ Note: GPIO 32 is shared with NMEA RX when using GPIO header mode.
 │ - Wind Sensor    │                              └──────────────────┘
 │ - Depth Sounder  │
 │ - Engine Data    │                  ┌─────────────────────┐
-└──────────────────┘                  │  GPIO Header        │
-                                      │  12-pin connector   │
-                                      │                     │
-                                      │  - GPS Module       │
-                                      │  - BME280 Sensor    │
-                                      └─────────────────────┘
+└──────────────────┘                  │  GPIO Header            │
+                                      │  12-pin connector       │
+                                      │                         │
+                                      │  - Single-Ended NMEA ⭐ │
+                                      │    (NASA Wind, etc.)    │
+                                      │  - GPS Module           │
+                                      │  - BME280 Sensor        │
+                                      │  - Seatalk1             │
+                                      └─────────────────────────┘
                                                │
                                                │ WiFi
                     ┌──────────────────────────▼──────────┐
@@ -363,7 +408,13 @@ NMEA0183 via RS485 started on terminal blocks A/B
 Using built-in RS485 transceiver (GPIO 21/22)
 
 Starting GPS module...
-GPS UART started on pins RX:25 TX:18
+GPS SoftwareSerial started on pins RX:25 TX:18 @ 9600 baud
+Note: GPS now uses SoftwareSerial (UART2 reserved for Single-Ended NMEA)
+
+=== Single-Ended NMEA 0183 Input ===
+Single-Ended NMEA initialized on GPIO 33 @ 4800 baud (UART2)
+Mode: Hardware RX inversion enabled for optocoupler compatibility
+✅ All peripherals active: RS485 (UART1) + Single-Ended (UART2) + GPS (SoftwareSerial)
 
 Initializing NMEA2000...
 CAN device ready
@@ -371,6 +422,9 @@ NMEA2000 initialized successfully
 
 Initializing I2C sensors...
 BME280 sensor found!  (or "No BME280 sensor detected")
+
+=== Seatalk 1 Initialization ===
+Seatalk 1 initialized successfully
 
 === SIGNALK SERVER READY ===
 ```
@@ -546,10 +600,19 @@ pio run --target upload
   #define NMEA_BAUD 4800
 #endif
 
-// GPS Module (Serial2)
+// Single-Ended NMEA (UART2 with hardware RX inversion)
+#define SINGLEENDED_RX 33          // GPIO header pin 4
+#define SINGLEENDED_BAUD 4800
+// Hardware inversion enabled automatically for optocoupler support
+
+// GPS Module (SoftwareSerial - moved from UART2)
 #define GPS_RX 25                  // GPIO header pin 5
 #define GPS_TX 18                  // GPIO header pin 6
 #define GPS_BAUD 9600
+
+// Seatalk1 (SoftwareSerial)
+#define SEATALK1_RX 32             // GPIO header pin 3
+#define SEATALK1_BAUD 4800
 
 // CAN Bus (NMEA 2000) - Hardware fixed, DON'T CHANGE
 #define CAN_TX 27
@@ -819,6 +882,14 @@ Uses `huge_app.csv` partition table:
 
 ## Recent Updates
 
+### November 2025 - Universal NMEA Support
+- ✅ **Single-Ended NMEA 0183** - New GPIO 33 input with hardware inverted RX for optocoupler support
+- ✅ **Plug-and-Play Optocouplers** - Native ESP32 UART inversion eliminates need for external inverter circuits
+- ✅ **All Peripherals Simultaneously** - RS485 (UART1) + Single-Ended (UART2) + GPS (SoftwareSerial) + Seatalk1 (SoftwareSerial)
+- ✅ **GPS Moved to SoftwareSerial** - UART2 now dedicated to Single-Ended NMEA with hardware features
+- ✅ **Configurable GPS Baud Rate** - Support for 9600, 4800, and custom rates
+- ✅ **NASA Wireless Wind Compatible** - Tested with NASA marine wind instruments
+
 ### November 2025 - SignalK Protocol Compliance
 - ✅ **Fixed WebSocket Delta Broadcasting** - Server now properly echoes client-sent deltas to all subscribers (SignalK v1 requirement)
 - ✅ **Enhanced Anchor Management** - Improved logic for anchor position setting independent of geofence activation
@@ -835,6 +906,9 @@ Uses `huge_app.csv` partition table:
 - [x] NMEA 0183 TCP server (port 10110)
 - [x] Full SignalK v1 protocol compliance
 - [x] Bi-directional WebSocket delta support
+- [x] Single-Ended NMEA with optocoupler support
+- [x] GPS on SoftwareSerial
+- [x] Seatalk1 protocol support
 - [ ] SD card data logging
 - [ ] More NMEA 2000 PGNs (engine, rudder, AIS)
 - [ ] Compass/IMU support (heel, pitch, roll)

@@ -40,10 +40,10 @@ Pin Layout (Top View):
 Typical Pin Assignments:
 Pin 1:  3.3V
 Pin 2:  GND
-Pin 3:  GPIO 32  ← NMEA RX (Serial1)
-Pin 4:  GPIO 33  ← NMEA TX (Serial1)
-Pin 5:  GPIO 25  ← GPS RX (Serial2)
-Pin 6:  GPIO 18  ← GPS TX (Serial2)
+Pin 3:  GPIO 32  ← Seatalk1 RX (SoftwareSerial)
+Pin 4:  GPIO 33  ← Single-Ended NMEA RX (UART2 with hardware inversion)
+Pin 5:  GPIO 25  ← GPS RX (SoftwareSerial)
+Pin 6:  GPIO 18  ← GPS TX (SoftwareSerial)
 Pin 7:  GPIO 5   ← I2C SDA
 Pin 8:  GPIO 34  ← I2C SCL (input-only)
 Pin 9:  GPIO 35  ← Available
@@ -56,27 +56,34 @@ Pin 12: GND
 
 ## 🔧 Connection Guide
 
-### For NMEA 0183 Instruments
+### For Single-Ended NMEA 0183 (Direct Connection with Optocoupler)
 
-**Connect your NMEA 0183 device to:**
+**⭐ NEW: Hardware inverted RX support for optocouplers!**
 
 ```
 NMEA Device          T-CAN485 GPIO Header
 ─────────────────────────────────────────
-TX (transmit) ────→  GPIO 32 (Pin 3) - RX
-RX (receive)  ────→  GPIO 33 (Pin 4) - TX
+NMEA OUT      ────→  Optocoupler ────→ GPIO 33 (Pin 4) - RX
 GND           ────→  GND (Pin 2 or 12)
+
+Note: Hardware RX inversion enabled automatically
+      Plug-and-play with optocouplers (PC817, etc.)
+      No external inverter circuit needed!
 ```
 
-### For GPS Module
+**📖 See [docs/SINGLE_ENDED_NMEA.md](../../docs/SINGLE_ENDED_NMEA.md) for complete wiring guide**
+
+### For GPS Module (SoftwareSerial)
 
 ```
 GPS Module           T-CAN485 GPIO Header
 ─────────────────────────────────────────
-TX (transmit) ────→  GPIO 25 (Pin 5) - RX
-RX (receive)  ────→  GPIO 18 (Pin 6) - TX
+TX (transmit) ────→  GPIO 25 (Pin 5) - RX (SoftwareSerial)
+RX (receive)  ────→  GPIO 18 (Pin 6) - TX (SoftwareSerial)
 VCC           ────→  3.3V (Pin 1)
 GND           ────→  GND (Pin 2 or 12)
+
+Note: GPS moved to SoftwareSerial to free UART2 for Single-Ended NMEA
 ```
 
 ### For Seatalk1 (SoftwareSerial)
@@ -125,10 +132,10 @@ GND           ────→  GND (Pin 2 or 12)
 | GPIO | Status | Usage | Notes |
 |------|--------|-------|-------|
 | GPIO 5 | ✅ Available | I2C SDA | Can be used for BME280 |
-| GPIO 18 | ✅ Used | GPS TX (Serial2) | Fixed assignment |
-| GPIO 25 | ✅ Used | GPS RX (Serial2) | Fixed assignment |
+| GPIO 18 | ✅ Used | GPS TX (SoftwareSerial) | Fixed assignment |
+| GPIO 25 | ✅ Used | GPS RX (SoftwareSerial) | Fixed assignment |
 | GPIO 32 | ✅ Used | Seatalk1 RX (SoftwareSerial) | No conflicts! |
-| GPIO 33 | 🟡 Available | Backup I/O | Optional expansion |
+| GPIO 33 | ✅ Used | Single-Ended NMEA RX (UART2) | Hardware inverted RX |
 | GPIO 34 | ✅ Available | I2C SCL | Input-only, pull-up required |
 | GPIO 35 | 🟡 Available | ADC / Input | Input-only |
 | GPIO 36 | 🟡 Available | ADC / Input | Input-only |
@@ -220,10 +227,17 @@ After connecting, upload the firmware and check the serial monitor:
 
 ```
 Starting NMEA UART...
-NMEA0183 UART started on pins RX:32 TX:33
+NMEA0183 via RS485 started on terminal blocks A/B
 
 Starting GPS module...
-GPS UART started on pins RX:25 TX:18
+GPS SoftwareSerial started on pins RX:25 TX:18 @ 9600 baud
+
+=== Single-Ended NMEA 0183 Input ===
+Single-Ended NMEA initialized on GPIO 33 @ 4800 baud (UART2)
+Mode: Hardware RX inversion enabled for optocoupler compatibility
+
+=== Seatalk 1 Initialization ===
+Seatalk 1 initialized successfully
 
 Initializing NMEA2000...
 NMEA2000 initialized successfully
