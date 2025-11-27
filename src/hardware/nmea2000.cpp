@@ -49,8 +49,6 @@ void HandleN2kPosition(const tN2kMsg &N2kMsg) {
 
     updateNavigationPosition(latitude, longitude, "nmea2000.can");
 
-    Serial.printf("N2K Position: %.6f, %.6f\n", latitude, longitude);
-
     // NMEA 0183 broadcasting is now done from dataStore in main loop
     // This ensures per-path priority filtering
   }
@@ -70,8 +68,6 @@ void HandleN2kCOGSOG(const tN2kMsg &N2kMsg) {
       gpsData.sog = SOG;
       setPathValue("navigation.speedOverGround", SOG, "nmea2000.can", "m/s", "Speed over ground");
     }
-
-    Serial.printf("N2K COG/SOG: %.1f deg, %.2f m/s\n", RadToDeg(COG), SOG);
 
     // NMEA 0183 broadcasting is now done from dataStore in main loop
   }
@@ -100,13 +96,7 @@ void HandleN2kWindSpeed(const tN2kMsg &N2kMsg) {
       }
     }
 
-    if (!N2kIsNA(WindSpeed) && !N2kIsNA(WindAngle)) {
-      Serial.printf("N2K Wind (%s): %.1f m/s at %.0f deg\n",
-                    WindReference == N2kWind_Apparent ? "App" : "True",
-                    WindSpeed, RadToDeg(WindAngle));
-
-      // NMEA 0183 broadcasting is now done from dataStore in main loop
-    }
+    // NMEA 0183 broadcasting is now done from dataStore in main loop
   }
 }
 
@@ -118,7 +108,6 @@ void HandleN2kWaterDepth(const tN2kMsg &N2kMsg) {
     if (!N2kIsNA(DepthBelowTransducer)) {
       setPathValue("environment.depth.belowTransducer", DepthBelowTransducer, "nmea2000.can", "m", "Depth below transducer");
       updateDepthAlarm(DepthBelowTransducer);
-      Serial.printf("N2K Depth: %.1f m\n", DepthBelowTransducer);
 
       // NMEA 0183 broadcasting is now done from dataStore in main loop
     }
@@ -131,9 +120,7 @@ void HandleN2kOutsideEnvironment(const tN2kMsg &N2kMsg) {
 
   if (ParseN2kPGN130310(N2kMsg, SID, WaterTemperature, OutsideAmbientAirTemperature, AtmosphericPressure)) {
     if (!N2kIsNA(WaterTemperature)) {
-      double tempC = KelvinToC(WaterTemperature);
       setPathValue("environment.water.temperature", WaterTemperature, "nmea2000.can", "K", "Water temperature");
-      Serial.printf("N2K Water Temp: %.1f°C\n", tempC);
 
       // NMEA 0183 broadcasting is now done from dataStore in main loop
     }
@@ -200,11 +187,8 @@ void initNMEA2000() {
   NMEA2000.SetMsgHandler(HandleN2kMessage);
   Serial.println("Message handler registered");
 
-  // Enable forward mode to see ALL raw NMEA2000 messages on Serial
-  NMEA2000.SetForwardType(tNMEA2000::fwdt_Text);
-  NMEA2000.SetForwardStream(&Serial);
-  NMEA2000.EnableForward(true);  // Make sure forwarding is enabled
-  Serial.println("Forward mode enabled - will show ALL N2K messages on bus");
+  // Forward mode disabled for production (too verbose)
+  NMEA2000.EnableForward(false);
 
   const uint8_t preferredAddress = 25;  // Recommended gateway address
   NMEA2000.SetMode(tNMEA2000::N2km_ListenAndNode, preferredAddress);

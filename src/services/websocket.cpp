@@ -321,13 +321,9 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     bool hasData = false;
 
     // Send current values for subscribed paths
-    Serial.printf("DEBUG subscription: dataStore has %d items\n", dataStore.size());
     for (auto& kv : dataStore) {
-      Serial.printf("DEBUG subscription: checking path='%s' len=%d\n", kv.first.c_str(), kv.first.length());
-
       // Skip items with empty or invalid paths
       if (kv.first.length() == 0) {
-        Serial.printf("WARNING: Skipping empty path in subscription\n");
         continue;
       }
 
@@ -335,18 +331,14 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
       String trimmedPath = kv.first;
       trimmedPath.trim();
       if (trimmedPath.length() == 0) {
-        Serial.printf("WARNING: Skipping whitespace path in subscription: '%s' len=%d\n",
-                      kv.first.c_str(), kv.first.length());
         continue;
       }
 
       // Check if this path is subscribed
       if (!isPathSubscribed(sub, kv.first)) {
-        Serial.printf("DEBUG subscription: path NOT subscribed, skipping\n");
         continue;
       }
 
-      Serial.printf("DEBUG subscription: Adding to JSON\n");
       hasData = true;
       JsonObject val = values.createNestedObject();
       val["path"] = kv.first;
