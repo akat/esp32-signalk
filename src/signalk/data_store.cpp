@@ -17,6 +17,50 @@ extern GeofenceConfig geofence;
 extern DepthAlarmConfig depthAlarm;
 extern WindAlarmConfig windAlarm;
 
+// Priority: nmea2000 -> nmea0183 -> nmea0183 single -> seatalk -> GPS -> TCP -> others
+static int sourcePriorityRank(const String& source) {
+  String s = source;
+  s.toLowerCase();
+  if (s == "nmea2000.can") return 0;
+  if (s == "nmea0183.rs485") return 1;
+  if (s == "nmea0183.singleended") return 2;
+  if (s == "seatalk1") return 3;
+  if (s == "nmea0183.gps") return 4;
+  if (s == "nmea0183.tcp") return 5;
+  return 6;  // lowest priority for unknown/internal
+}
+
+// Track last update time per path/source to handle stale sources
+static std::map<String, std::map<String, uint32_t>> sourceUpdateTimes;
+
+static bool shouldReplace(const String& path, const String& newSource) {
+  auto it = dataStore.find(path);
+  if (it == dataStore.end()) {
+    return true;
+  }
+  const String& existingSource = it->second.source;
+
+  // If current source is stale (>10 seconds), allow replacement
+  const uint32_t STALE_MS = 10000;
+  uint32_t now = millis();
+  if (sourceUpdateTimes.count(path) && sourceUpdateTimes[path].count(existingSource)) {
+    uint32_t lastUpdate = sourceUpdateTimes[path][existingSource];
+    if ((now - lastUpdate) > STALE_MS) {
+      return true;
+    }
+  }
+
+  int newRank = sourcePriorityRank(newSource);
+  int existingRank = sourcePriorityRank(existingSource);
+
+  // Allow refresh from same source, or higher priority taking over
+  if (newSource == existingSource) return true;
+  if (newRank < existingRank) return true;
+
+  // Otherwise keep current until it goes stale
+  return false;
+}
+
 bool handleAnchorPartialUpdate(const String& path, bool isNumeric,
                                double numericValue, const String& strValue,
                                const String& source, const String& units,
@@ -255,6 +299,10 @@ void setPathValue(const String& path, double value, const String& source,
     return;
   }
 
+  if (!shouldReplace(path, source)) {
+    return;
+  }
+
   PathValue& pv = dataStore[path];
   pv.numValue = value;
   pv.isNumeric = true;
@@ -265,6 +313,8 @@ void setPathValue(const String& path, double value, const String& source,
   pv.units = units;
   pv.description = description;
   pv.changed = true;
+
+  sourceUpdateTimes[path][source] = millis();
 }
 
 void setPathValue(const String& path, const String& value, const String& source,
@@ -279,6 +329,10 @@ void setPathValue(const String& path, const String& value, const String& source,
     return;
   }
 
+  if (!shouldReplace(path, source)) {
+    return;
+  }
+
   PathValue& pv = dataStore[path];
   pv.strValue = value;
   pv.isNumeric = false;
@@ -289,6 +343,8 @@ void setPathValue(const String& path, const String& value, const String& source,
   pv.units = units;
   pv.description = description;
   pv.changed = true;
+
+  sourceUpdateTimes[path][source] = millis();
 }
 
 static bool anchorPersistPending = false;
@@ -345,6 +401,10 @@ void setPathValueJson(const String& path, const String& jsonValue, const String&
     return;
   }
 
+  if (!shouldReplace(path, source)) {
+    return;
+  }
+
   String normalized = jsonValue;
   if (path == "navigation.anchor.akat") {
     normalized = normalizeAnchorConfig(jsonValue);
@@ -359,6 +419,8 @@ void setPathValueJson(const String& path, const String& jsonValue, const String&
   pv.units = units;
   pv.description = description;
   pv.changed = true;
+
+  sourceUpdateTimes[path][source] = millis();
 
   // Persist important configuration paths to flash
   if (path == "navigation.anchor.akat") {

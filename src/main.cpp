@@ -112,6 +112,17 @@ unsigned long lastPushNotification = 0;
 // GPS and navigation data
 GPSData gpsData;
 
+// TCP broadcast priority tracking for NMEA sentences
+struct TcpSourceInfo {
+  String sentence;      // with CRLF
+  uint32_t timestamp;   // millis when received
+  int rank;             // lower = higher priority
+};
+static std::map<String, TcpSourceInfo> tcpSources;
+static String activeTcpSource = "";
+static uint32_t activeTcpLastTs = 0;
+static const uint32_t TCP_STALE_MS = 10000;  // 10s fallback window
+
 // Alarm configurations
 GeofenceConfig geofence;
 DepthAlarmConfig depthAlarm;
@@ -134,16 +145,76 @@ void handleNmeaSentence(const String& sentence, const char* sourceTag) {
     return;
   }
 
-  if (sourceTag != nullptr) {
-    Serial.printf("NMEA [%s]: %s\n", sourceTag, sentence.c_str());
+  // Priority rank for TCP broadcast (lower = higher priority)
+  auto tcpPriorityRank = [](const String& src) {
+    String s = src;
+    s.toLowerCase();
+    if (s.indexOf("nmea2000") >= 0 || s.indexOf("can") >= 0) return 0;
+    if (s.indexOf("rs485") >= 0) return 1;
+    if (s.indexOf("single") >= 0) return 2;
+    if (s.indexOf("seatalk") >= 0) return 3;
+    if (s.indexOf("gps") >= 0) return 4;
+    if (s.indexOf("tcp") >= 0) return 5;
+    return 6;
+  };
+
+  String sourceLabel = (sourceTag != nullptr) ? String(sourceTag) : "unknown";
+  int rank = tcpPriorityRank(sourceLabel);
+
+  // Store latest sentence per source (with CRLF) and timestamp
+  TcpSourceInfo info;
+  info.sentence = sentence.endsWith("\r\n") ? sentence : sentence + "\r\n";
+  info.timestamp = millis();
+  info.rank = rank;
+  tcpSources[sourceLabel] = info;
+
+  // Determine best fresh source (within staleness window)
+  String bestSource = "";
+  int bestRank = 99;
+  uint32_t now = millis();
+  uint32_t bestTs = 0;
+  for (auto& pair : tcpSources) {
+    const TcpSourceInfo& s = pair.second;
+    if ((now - s.timestamp) > TCP_STALE_MS) continue;  // stale
+    if (s.rank < bestRank || (s.rank == bestRank && s.timestamp > bestTs)) {
+      bestRank = s.rank;
+      bestSource = pair.first;
+      bestTs = s.timestamp;
+    }
+  }
+
+  bool shouldBroadcast = false;
+  String toSend;
+
+  // Switch active source if current is stale or missing
+  bool activeStale = (activeTcpSource.length() == 0) ||
+                     ((now - activeTcpLastTs) > TCP_STALE_MS);
+
+  if (bestSource.length() > 0) {
+    if (bestSource == activeTcpSource) {
+      // Same active source; only broadcast when this source sends
+      if (sourceLabel == activeTcpSource) {
+        shouldBroadcast = true;
+        toSend = info.sentence;
+        activeTcpLastTs = now;
+      }
+    } else if (activeStale || bestRank < tcpPriorityRank(activeTcpSource)) {
+      // Switch to a better/fresh source
+      auto it = tcpSources.find(bestSource);
+      if (it != tcpSources.end()) {
+        shouldBroadcast = true;
+        toSend = it->second.sentence;
+        activeTcpSource = bestSource;
+        activeTcpLastTs = it->second.timestamp;
+      }
+    }
   }
 
   parseNMEASentence(sentence);
 
-  // Re-broadcast to TCP clients so external tools see the same stream
-  String broadcastSentence = sentence;
-  broadcastSentence += "\r\n";
-  broadcastNMEA0183(broadcastSentence);
+  if (shouldBroadcast && toSend.length() > 0) {
+    broadcastNMEA0183(toSend);
+  }
 }
 
 // Serial port buffers
