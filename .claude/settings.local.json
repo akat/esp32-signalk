@@ -23,7 +23,11 @@
       "Bash(nul)",
       "Bash(del /F /Q .piobuildesp32devsrc*.o 2)",
       "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor:*)",
-      "Bash(del /F /Q nul)"
+      "Bash(del /F /Q nul)",
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" run)",
+      "Bash(timeout /t 5)",
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor --baud 115200)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []

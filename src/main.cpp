@@ -79,6 +79,10 @@
 #include "api/routes.h"
 #include "api/web_auth.h"
 
+// ====== FORWARD DECLARATIONS ======
+// Declare functions that will be used by hardware modules
+bool shouldBroadcastFromSource(const char* sourceTag);
+
 // ====== GLOBAL VARIABLE DEFINITIONS ======
 // These are declared as 'extern' in various header files and defined here
 
@@ -112,15 +116,14 @@ unsigned long lastPushNotification = 0;
 // GPS and navigation data
 GPSData gpsData;
 
-// TCP broadcast priority tracking for NMEA sentences
+// TCP broadcast priority tracking - ONE active source broadcasts at a time
+// This prevents duplicate data (e.g., position, depth) from multiple sources
 struct TcpSourceInfo {
-  String sentence;      // with CRLF
-  uint32_t timestamp;   // millis when received
-  int rank;             // lower = higher priority
+  uint32_t lastSeen;   // millis when last sentence received from this source
+  int rank;            // lower = higher priority
 };
 static std::map<String, TcpSourceInfo> tcpSources;
-static String activeTcpSource = "";
-static uint32_t activeTcpLastTs = 0;
+static String activeTcpSource = "";  // Currently broadcasting source (global for all sentences)
 static const uint32_t TCP_STALE_MS = 10000;  // 10s fallback window
 
 // Alarm configurations
@@ -139,82 +142,108 @@ uint32_t tcpConnectedTime = 0;
 String tcpBuffer = "";
 TcpClientState tcpState = TCP_DISCONNECTED;
 
+// Map source tag to dataStore source label
+static String sourceTagToLabel(const String& tag) {
+  String t = tag;
+  t.toLowerCase();
+  if (t.indexOf("nmea2000") >= 0 || t.indexOf("can") >= 0) return "nmea2000.can";
+  if (t.indexOf("rs485") >= 0) return "nmea0183.rs485";
+  if (t.indexOf("single") >= 0) return "nmea0183.singleended";
+  if (t.indexOf("seatalk") >= 0) return "seatalk1";
+  if (t.indexOf("gps") >= 0 || tag.length() == 0) return "nmea0183.GPS";  // nullptr maps to GPS
+  if (t.indexOf("tcp") >= 0) return "nmea0183.tcp";
+  return "nmea0183.GPS";  // default
+}
+
+// Priority rank for TCP broadcast (lower = higher priority)
+static int tcpPriorityRank(const String& src) {
+  String s = src;
+  s.toLowerCase();
+  if (s.indexOf("nmea2000") >= 0 || s.indexOf("can") >= 0) return 0;
+  if (s.indexOf("rs485") >= 0) return 1;
+  if (s.indexOf("single") >= 0) return 2;
+  if (s.indexOf("seatalk") >= 0) return 3;
+  if (s.indexOf("gps") >= 0) return 4;
+  if (s.indexOf("tcp") >= 0) return 5;
+  return 6;
+}
+
+// Helper function to check if a source should broadcast to TCP
+// Returns true if this source has the highest priority among all active sources
+bool shouldBroadcastFromSource(const char* sourceTag) {
+  String tag = sourceTag ? String(sourceTag) : "";
+  String myLabel = sourceTagToLabel(tag);
+  int myRank = tcpPriorityRank(tag);
+
+  // Check dataStore to find the best (lowest rank) source that has data
+  extern std::map<String, PathValue> dataStore;
+
+  int bestRank = 999;
+  for (const auto& pair : dataStore) {
+    const PathValue& pv = pair.second;
+    int rank = tcpPriorityRank(pv.source);
+    if (rank < bestRank) {
+      bestRank = rank;
+    }
+  }
+
+  // Broadcast only if this source has the best rank
+  return (myRank <= bestRank);
+}
+
 // Central handler to keep NMEA inputs consistent across all sources
 void handleNmeaSentence(const String& sentence, const char* sourceTag) {
   if (sentence.length() < 7 || sentence[0] != '$') {
     return;
   }
 
-  // Priority rank for TCP broadcast (lower = higher priority)
-  auto tcpPriorityRank = [](const String& src) {
-    String s = src;
-    s.toLowerCase();
-    if (s.indexOf("nmea2000") >= 0 || s.indexOf("can") >= 0) return 0;
-    if (s.indexOf("rs485") >= 0) return 1;
-    if (s.indexOf("single") >= 0) return 2;
-    if (s.indexOf("seatalk") >= 0) return 3;
-    if (s.indexOf("gps") >= 0) return 4;
-    if (s.indexOf("tcp") >= 0) return 5;
-    return 6;
-  };
-
   String sourceLabel = (sourceTag != nullptr) ? String(sourceTag) : "unknown";
   int rank = tcpPriorityRank(sourceLabel);
-
-  // Store latest sentence per source (with CRLF) and timestamp
-  TcpSourceInfo info;
-  info.sentence = sentence.endsWith("\r\n") ? sentence : sentence + "\r\n";
-  info.timestamp = millis();
-  info.rank = rank;
-  tcpSources[sourceLabel] = info;
-
-  // Determine best fresh source (within staleness window)
-  String bestSource = "";
-  int bestRank = 99;
   uint32_t now = millis();
-  uint32_t bestTs = 0;
+
+  // Update this source's last seen timestamp and rank
+  TcpSourceInfo srcInfo;
+  srcInfo.lastSeen = now;
+  srcInfo.rank = rank;
+  tcpSources[sourceLabel] = srcInfo;
+
+  // Determine which source should be active for TCP broadcasting
+  // Rule: Use the highest priority (lowest rank) source that is NOT stale
+  String bestSource = "";
+  int bestRank = 999;
+
   for (auto& pair : tcpSources) {
-    const TcpSourceInfo& s = pair.second;
-    if ((now - s.timestamp) > TCP_STALE_MS) continue;  // stale
-    if (s.rank < bestRank || (s.rank == bestRank && s.timestamp > bestTs)) {
-      bestRank = s.rank;
-      bestSource = pair.first;
-      bestTs = s.timestamp;
+    const String& src = pair.first;
+    const TcpSourceInfo& info = pair.second;
+
+    // Skip stale sources
+    if ((now - info.lastSeen) > TCP_STALE_MS) continue;
+
+    // Find best (lowest rank = highest priority)
+    if (info.rank < bestRank) {
+      bestRank = info.rank;
+      bestSource = src;
     }
   }
 
-  bool shouldBroadcast = false;
-  String toSend;
-
-  // Switch active source if current is stale or missing
-  bool activeStale = (activeTcpSource.length() == 0) ||
-                     ((now - activeTcpLastTs) > TCP_STALE_MS);
-
-  if (bestSource.length() > 0) {
-    if (bestSource == activeTcpSource) {
-      // Same active source; only broadcast when this source sends
-      if (sourceLabel == activeTcpSource) {
-        shouldBroadcast = true;
-        toSend = info.sentence;
-        activeTcpLastTs = now;
-      }
-    } else if (activeStale || bestRank < tcpPriorityRank(activeTcpSource)) {
-      // Switch to a better/fresh source
-      auto it = tcpSources.find(bestSource);
-      if (it != tcpSources.end()) {
-        shouldBroadcast = true;
-        toSend = it->second.sentence;
-        activeTcpSource = bestSource;
-        activeTcpLastTs = it->second.timestamp;
-      }
+  // Update active source if changed
+  if (bestSource != activeTcpSource) {
+    if (activeTcpSource.length() > 0) {
+      Serial.printf("TCP Priority: Switching from %s to %s (rank %d)\n",
+                   activeTcpSource.c_str(), bestSource.c_str(), bestRank);
+    } else {
+      Serial.printf("TCP Priority: Activating %s (rank %d)\n",
+                   bestSource.c_str(), bestRank);
     }
+    activeTcpSource = bestSource;
   }
 
+  // ALWAYS parse sentence to update SignalK data store from ALL sources
   parseNMEASentence(sentence);
 
-  if (shouldBroadcast && toSend.length() > 0) {
-    broadcastNMEA0183(toSend);
-  }
+  // NOTE: We do NOT forward raw sentences anymore!
+  // Instead, NMEA sentences are generated from the dataStore periodically
+  // in the main loop. This ensures per-path priority filtering.
 }
 
 // Serial port buffers
@@ -792,6 +821,102 @@ uint32_t lastSessionCleanup = 0;
 bool wasWifiConnected = false;
 int wifiReconnectAttempts = 0;
 
+// Generate NMEA 0183 sentences from SignalK dataStore
+// This ensures per-path priority filtering - only the best source for each path
+void generateNmeaFromDataStore() {
+  extern std::map<String, PathValue> dataStore;
+
+  static uint32_t debugCounter = 0;
+  if (debugCounter++ % 10 == 0) {  // Debug every 10 seconds
+    Serial.printf("\n=== generateNmeaFromDataStore() called (dataStore size: %d) ===\n", dataStore.size());
+  }
+
+  // Helper to safely get path value
+  auto getPath = [](const String& path, double& out) -> bool {
+    auto it = dataStore.find(path);
+    if (it != dataStore.end()) {
+      if (it->second.isNumeric) {
+        out = it->second.numValue;
+        return true;
+      } else if (!it->second.strValue.isEmpty()) {
+        out = it->second.strValue.toDouble();
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Generate position sentences (GGA, GLL) if we have navigation.position
+  auto posIt = dataStore.find("navigation.position");
+  if (posIt != dataStore.end() && !posIt->second.jsonValue.isEmpty()) {
+    // Parse the position JSON
+    StaticJsonDocument<200> doc;
+    DeserializationError error = deserializeJson(doc, posIt->second.jsonValue);
+    if (!error && doc.containsKey("latitude") && doc.containsKey("longitude")) {
+      double lat = doc["latitude"];
+      double lon = doc["longitude"];
+
+      // Generate GGA
+      double altitude = 0;
+      int satellites = 0;
+      getPath("navigation.gnss.altitude", altitude);
+      auto satIt = dataStore.find("navigation.gnss.satellitesInView");
+      if (satIt != dataStore.end()) {
+        satellites = satIt->second.isNumeric ? (int)satIt->second.numValue : (int)satIt->second.strValue.toDouble();
+      }
+
+      String gga = convertToGGA(lat, lon, iso8601Now(), satellites, altitude);
+      if (debugCounter % 10 == 0) Serial.printf("  Generated GGA: %s", gga.c_str());
+      broadcastNMEA0183(gga);
+
+      // Generate GLL
+      String gll = convertToGLL(lat, lon, iso8601Now());
+      if (debugCounter % 10 == 0) Serial.printf("  Generated GLL: %s", gll.c_str());
+      broadcastNMEA0183(gll);
+
+      // Generate RMC if we have COG and SOG
+      double cog, sog;
+      if (getPath("navigation.courseOverGroundTrue", cog) && getPath("navigation.speedOverGround", sog)) {
+        String rmc = convertToRMC(lat, lon, cog, sog, iso8601Now());
+        if (debugCounter % 10 == 0) Serial.printf("  Generated RMC: %s", rmc.c_str());
+        broadcastNMEA0183(rmc);
+      }
+    }
+  }
+
+  // Generate VTG if we have COG and SOG
+  double cog, sog;
+  if (getPath("navigation.courseOverGroundTrue", cog) && getPath("navigation.speedOverGround", sog)) {
+    String vtg = convertToVTG(cog, sog);
+    broadcastNMEA0183(vtg);
+  }
+
+  // Generate MWV (wind) sentences
+  double windSpeed, windAngle;
+  if (getPath("environment.wind.speedApparent", windSpeed) && getPath("environment.wind.angleApparent", windAngle)) {
+    String mwv = convertToMWV(windAngle, windSpeed, 'R');  // Apparent = Relative
+    broadcastNMEA0183(mwv);
+  }
+  if (getPath("environment.wind.speedTrue", windSpeed) && getPath("environment.wind.angleTrueWater", windAngle)) {
+    String mwv = convertToMWV(windAngle, windSpeed, 'T');  // True
+    broadcastNMEA0183(mwv);
+  }
+
+  // Generate DPT (depth)
+  double depth;
+  if (getPath("environment.depth.belowTransducer", depth)) {
+    String dpt = convertToDPT(depth, 0.0);
+    broadcastNMEA0183(dpt);
+  }
+
+  // Generate MTW (water temperature)
+  double waterTemp;
+  if (getPath("environment.water.temperature", waterTemp)) {
+    String mtw = convertToMTW(waterTemp);
+    broadcastNMEA0183(mtw);
+  }
+}
+
 void loop() {
   // Process WiFiManager (non-blocking)
   wm.process();
@@ -1003,6 +1128,14 @@ void loop() {
 
   // Process NMEA 0183 TCP Server (port 10110)
   processNMEA0183Server();
+
+  // Generate and broadcast NMEA 0183 sentences from SignalK dataStore
+  // This ensures per-path priority filtering
+  static uint32_t lastNmeaGeneration = 0;
+  if (now - lastNmeaGeneration > 1000) {  // Generate every 1 second
+    lastNmeaGeneration = now;
+    generateNmeaFromDataStore();
+  }
 
   // TCP client connection and data processing
   connectToTcpServer();

@@ -51,17 +51,8 @@ void HandleN2kPosition(const tN2kMsg &N2kMsg) {
 
     Serial.printf("N2K Position: %.6f, %.6f\n", latitude, longitude);
 
-    // Broadcast NMEA 0183 sentences via TCP
-    static uint32_t lastGGA = 0;
-    uint32_t now = millis();
-    if (now - lastGGA > 1000) {  // Send GGA once per second
-      lastGGA = now;
-      String gga = convertToGGA(latitude, longitude, gpsData.timestamp, gpsData.satellites, gpsData.altitude);
-      broadcastNMEA0183(gga);
-
-      String gll = convertToGLL(latitude, longitude, gpsData.timestamp);
-      broadcastNMEA0183(gll);
-    }
+    // NMEA 0183 broadcasting is now done from dataStore in main loop
+    // This ensures per-path priority filtering
   }
 }
 
@@ -82,20 +73,7 @@ void HandleN2kCOGSOG(const tN2kMsg &N2kMsg) {
 
     Serial.printf("N2K COG/SOG: %.1f deg, %.2f m/s\n", RadToDeg(COG), SOG);
 
-    // Broadcast NMEA 0183 sentences via TCP
-    static uint32_t lastVTG = 0;
-    uint32_t now = millis();
-    if (!N2kIsNA(COG) && !N2kIsNA(SOG) && (now - lastVTG > 1000)) {  // Send VTG once per second
-      lastVTG = now;
-      String vtg = convertToVTG(COG, SOG);
-      broadcastNMEA0183(vtg);
-
-      // Send RMC if we have position data too
-      if (gpsData.lat != 0.0 && gpsData.lon != 0.0) {
-        String rmc = convertToRMC(gpsData.lat, gpsData.lon, COG, SOG, gpsData.timestamp);
-        broadcastNMEA0183(rmc);
-      }
-    }
+    // NMEA 0183 broadcasting is now done from dataStore in main loop
   }
 }
 
@@ -126,14 +104,8 @@ void HandleN2kWindSpeed(const tN2kMsg &N2kMsg) {
       Serial.printf("N2K Wind (%s): %.1f m/s at %.0f deg\n",
                     WindReference == N2kWind_Apparent ? "App" : "True",
                     WindSpeed, RadToDeg(WindAngle));
-      static uint32_t lastMWV = 0;
-      uint32_t now = millis();
-      if (now - lastMWV > 200) {
-        lastMWV = now;
-        char ref = (WindReference == N2kWind_Apparent) ? 'R' : 'T';
-        String mwv = convertToMWV(WindAngle, WindSpeed, ref);
-        broadcastNMEA0183(mwv);
-      }
+
+      // NMEA 0183 broadcasting is now done from dataStore in main loop
     }
   }
 }
@@ -148,15 +120,7 @@ void HandleN2kWaterDepth(const tN2kMsg &N2kMsg) {
       updateDepthAlarm(DepthBelowTransducer);
       Serial.printf("N2K Depth: %.1f m\n", DepthBelowTransducer);
 
-      // Broadcast NMEA 0183 DPT sentence via TCP
-      static uint32_t lastDPT = 0;
-      uint32_t now = millis();
-      if (now - lastDPT > 500) {  // Send DPT at 2Hz
-        lastDPT = now;
-        double offset = N2kIsNA(Offset) ? 0.0 : Offset;
-        String dpt = convertToDPT(DepthBelowTransducer, offset);
-        broadcastNMEA0183(dpt);
-      }
+      // NMEA 0183 broadcasting is now done from dataStore in main loop
     }
   }
 }
@@ -171,14 +135,7 @@ void HandleN2kOutsideEnvironment(const tN2kMsg &N2kMsg) {
       setPathValue("environment.water.temperature", WaterTemperature, "nmea2000.can", "K", "Water temperature");
       Serial.printf("N2K Water Temp: %.1f°C\n", tempC);
 
-      // Broadcast NMEA 0183 MTW sentence via TCP
-      static uint32_t lastMTW = 0;
-      uint32_t now = millis();
-      if (now - lastMTW > 2000) {  // Send MTW every 2 seconds
-        lastMTW = now;
-        String mtw = convertToMTW(WaterTemperature);
-        broadcastNMEA0183(mtw);
-      }
+      // NMEA 0183 broadcasting is now done from dataStore in main loop
     }
     if (!N2kIsNA(OutsideAmbientAirTemperature)) {
       setPathValue("environment.outside.temperature", OutsideAmbientAirTemperature, "nmea2000.can", "K", "Outside air temperature");
