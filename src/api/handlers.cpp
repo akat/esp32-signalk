@@ -154,14 +154,14 @@ const char* HTML_UI = R"html(
           <p class="eyebrow">SignalK Server</p>
           <h1>Vessel Dashboard</h1>
           <p class="subtitle">Monitor live SignalK data from your ESP32 gateway and confirm connections at a glance.</p>
-        </div>
-        <div class="hero-actions">
-          <a href="/" class="btn-link primary">Dashboard</a>
-          <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/config" class="btn-link secondary">Network</a>
-          <a href="/settings" class="btn-link secondary">Password</a>
-          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
-          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+          <div class="hero-actions">
+            <a href="/" class="btn-link primary">Dashboard</a>
+            <a href="/admin" class="btn-link secondary">Admin Panel</a>
+            <a href="/config" class="btn-link secondary">Network</a>
+            <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+            <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+            <a href="/settings" class="btn-link secondary">Settings</a>
+          </div>
         </div>
       </div>
     </div>
@@ -408,14 +408,14 @@ const char* HTML_CONFIG = R"html(
           <p class="eyebrow">SignalK Server</p>
           <h1>TCP Configuration</h1>
           <p class="subtitle">Link this ESP32 SignalK instance to an upstream server or data bridge.</p>
-        </div>
-        <div class="hero-actions">
-          <a href="/" class="btn-link primary">Dashboard</a>
-          <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/config" class="btn-link secondary">Network</a>
-          <a href="/settings" class="btn-link secondary">Password</a>
-          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
-          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+          <div class="hero-actions">
+            <a href="/" class="btn-link primary">Dashboard</a>
+            <a href="/admin" class="btn-link secondary">Admin Panel</a>
+            <a href="/config" class="btn-link secondary">Network</a>
+            <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+            <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+            <a href="/settings" class="btn-link secondary">Settings</a>
+          </div>
         </div>
       </div>
     </div>
@@ -770,14 +770,14 @@ const char* HTML_ADMIN = R"html(
           <p class="eyebrow">SignalK Admin</p>
           <h1>Token Management</h1>
           <p class="subtitle">Approve, deny, or revoke SignalK access tokens for connected devices.</p>
-        </div>
-        <div class="hero-actions">
-          <a href="/" class="btn-link primary">Dashboard</a>
-          <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/config" class="btn-link secondary">Network</a>
-          <a href="/settings" class="btn-link secondary">Password</a>
-          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
-          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+          <div class="hero-actions">
+            <a href="/" class="btn-link primary">Dashboard</a>
+            <a href="/admin" class="btn-link secondary">Admin Panel</a>
+            <a href="/config" class="btn-link secondary">Network</a>
+            <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+            <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+            <a href="/settings" class="btn-link secondary">Settings</a>
+          </div>
         </div>
       </div>
     </div>

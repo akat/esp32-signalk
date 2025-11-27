@@ -82,13 +82,14 @@ const char AP_SETTINGS_HTML[] PROGMEM = R"rawliteral(
           <p class="eyebrow">SignalK Configuration</p>
           <h1>WiFi AP Settings</h1>
           <p class="subtitle">Configure Access Point credentials and manage WiFi connections.</p>
-        </div>
-        <div class="hero-actions">
-          <a href="/" class="btn-link primary">Dashboard</a>
-          <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/config" class="btn-link secondary">Network</a>
-          <a href="/settings" class="btn-link secondary">Password</a>
-          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+          <div class="hero-actions">
+            <a href="/" class="btn-link primary">Dashboard</a>
+            <a href="/admin" class="btn-link secondary">Admin Panel</a>
+            <a href="/config" class="btn-link secondary">Network</a>
+            <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+            <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+            <a href="/settings" class="btn-link secondary">Settings</a>
+          </div>
         </div>
       </div>
     </div>

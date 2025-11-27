@@ -701,6 +701,17 @@ void setup() {
   setupRoutes(server);
   Serial.println("HTTP routes configured");
 
+  // Reboot endpoint
+  server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest* req) {
+    req->send(200, "text/html",
+      "<html><body><h2>Rebooting device...</h2>"
+      "<p>Please wait 10 seconds then refresh.</p>"
+      "<script>setTimeout(function(){window.location.href='/';}, 10000);</script>"
+      "</body></html>");
+    delay(100);
+    ESP.restart();
+  });
+
   Serial.println("Starting HTTP server...");
   server.begin();
   Serial.println("\nHTTP Server started");

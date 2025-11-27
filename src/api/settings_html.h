@@ -29,7 +29,7 @@ const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
     .hero-content { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
     .hero-text .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; opacity: 0.85; margin-bottom: 8px; }
     .hero-text h1 { font-size: 30px; margin-bottom: 8px; }
-    .hero-text .subtitle { font-size: 15px; color: rgba(255,255,255,0.88); max-width: 520px; }
+    .hero-text .subtitle { font-size: 15px; color: rgba(255,255,255,0.88); max-width: 520px; margin-bottom: 20px; }
     .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 
     .btn-link { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; border-radius: 999px; font-weight: 600; text-decoration: none; border: 1px solid rgba(255,255,255,0.5); transition: transform 0.2s ease, box-shadow 0.2s ease; }
@@ -80,13 +80,14 @@ const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
           <p class="eyebrow">SignalK Configuration</p>
           <h1>Account Settings</h1>
           <p class="subtitle">Manage your password and account security preferences.</p>
-        </div>
-        <div class="hero-actions">
-          <a href="/" class="btn-link primary">Dashboard</a>
-          <a href="/admin" class="btn-link secondary">Admin Panel</a>
-          <a href="/config" class="btn-link secondary">Network</a>
-          <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
-          <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+          <div class="hero-actions">
+            <a href="/" class="btn-link primary">Dashboard</a>
+            <a href="/admin" class="btn-link secondary">Admin Panel</a>
+            <a href="/config" class="btn-link secondary">Network</a>
+            <a href="/hardware-settings" class="btn-link secondary">Hardware</a>
+            <a href="/ap-settings" class="btn-link secondary">WiFi AP</a>
+            <a href="/settings" class="btn-link secondary">Settings</a>
+          </div>
         </div>
       </div>
     </div>
@@ -120,6 +121,19 @@ const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
         </div>
         <div id="status-display"></div>
       </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2>Device Management</h2>
+          <p class="muted">Restart the ESP32 device. All connections will be temporarily lost.</p>
+        </div>
+      </div>
+      <div class="button-row">
+        <button type="button" class="btn danger" onclick="rebootDevice()">Reboot device</button>
+      </div>
+      <div id="reboot-status"></div>
     </div>
   </div>
 
@@ -170,6 +184,35 @@ const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
         console.error('Logout error:', err);
       }
       window.location.href = '/login.html';
+    }
+
+    async function rebootDevice() {
+      const statusDisplay = document.getElementById('reboot-status');
+
+      if (!confirm('Are you sure you want to reboot the device? All connections will be lost temporarily.')) {
+        return;
+      }
+
+      statusDisplay.innerHTML = '<span class="status-pill success">Rebooting device... Please wait 10 seconds.</span>';
+
+      try {
+        await fetch('/reboot');
+
+        // Show countdown
+        let countdown = 10;
+        const interval = setInterval(() => {
+          countdown--;
+          if (countdown <= 0) {
+            clearInterval(interval);
+            statusDisplay.innerHTML = '<span class="status-pill success">Device rebooted. Reloading page...</span>';
+            window.location.reload();
+          } else {
+            statusDisplay.innerHTML = '<span class="status-pill success">Device rebooting... ' + countdown + ' seconds remaining</span>';
+          }
+        }, 1000);
+      } catch (err) {
+        statusDisplay.innerHTML = '<span class="status-pill error">Failed to initiate reboot</span>';
+      }
     }
   </script>
 </body>
