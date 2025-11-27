@@ -63,23 +63,6 @@ static bool isPathSubscribed(const ClientSubscription& sub, const String& path) 
 
 // ====== WEBSOCKET DELTA BROADCAST ======
 void broadcastDeltas() {
-  // Removed throttling - broadcast immediately when data is available
-
-  // Debug: Log dataStore size and changed items
-  static uint32_t lastDebugDataStore = 0;
-  if (millis() - lastDebugDataStore > 10000) {  // Every 10 seconds
-    Serial.printf("DEBUG: dataStore size = %d\n", dataStore.size());
-    int changedCount = 0;
-    for (auto& kv : dataStore) {
-      if (kv.second.changed) {
-        changedCount++;
-        Serial.printf("  - CHANGED: %s\n", kv.first.c_str());
-      }
-    }
-    Serial.printf("DEBUG: Changed items = %d\n", changedCount);
-    lastDebugDataStore = millis();
-  }
-
   // Build delta message
   DynamicJsonDocument doc(4096);
   doc["context"] = "vessels." + vesselUUID;
@@ -169,51 +152,6 @@ void broadcastDeltas() {
 
   String output;
   serializeJson(doc, output);
-
-  // CRITICAL VALIDATION: Parse the serialized JSON and verify no empty objects in values array
-  DynamicJsonDocument verify(4096);
-  DeserializationError error = deserializeJson(verify, output);
-  if (error) {
-    Serial.printf("ERROR: Failed to parse serialized JSON for validation: %s\n", error.c_str());
-    return; // Don't send corrupted JSON
-  }
-
-  // Check if updates array exists and has at least one update
-  if (verify.containsKey("updates") && verify["updates"].size() > 0) {
-    JsonArray updates_array = verify["updates"];
-    for (JsonVariant update_var : updates_array) {
-      JsonObject update_obj = update_var.as<JsonObject>();
-      if (update_obj.containsKey("values")) {
-        JsonArray vals = update_obj["values"];
-        for (JsonVariant v : vals) {
-          JsonObject obj = v.as<JsonObject>();
-          // Check if object is empty or has no path
-          if (obj.size() == 0) {
-            Serial.println("ERROR: Found completely empty object {} in serialized JSON, dropping entire message");
-            return; // Don't send this message at all
-          }
-          if (!obj.containsKey("path")) {
-            Serial.println("ERROR: Found object without 'path' field in serialized JSON, dropping entire message");
-            return; // Don't send this message at all
-          }
-          String path_check = obj["path"].as<String>();
-          if (path_check.length() == 0) {
-            Serial.println("ERROR: Found object with empty path string in serialized JSON, dropping entire message");
-            return; // Don't send this message at all
-          }
-        }
-      }
-    }
-  }
-
-  // Debug: Log WebSocket broadcast
-  static uint32_t lastDebugLog = 0;
-  if (millis() - lastDebugLog > 5000) {  // Log every 5 seconds to avoid spam
-    Serial.println("=== WebSocket Broadcast (validated) ===");
-    Serial.println(output);
-    Serial.println("=======================================");
-    lastDebugLog = millis();
-  }
 
   if (clientSubscriptions.empty()) {
     // Legacy behavior: broadcast to everyone when no one negotiated subscriptions

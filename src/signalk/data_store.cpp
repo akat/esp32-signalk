@@ -469,3 +469,30 @@ void setNotification(const String& path, const String& state, const String& mess
 void clearNotification(const String& path) {
   setNotification(path, "normal", "");
 }
+
+bool getCurrentPosition(double& lat, double& lon) {
+  // Read from dataStore which respects source priorities
+  auto it = dataStore.find("navigation.position");
+  if (it == dataStore.end() || !it->second.isJson) {
+    return false;
+  }
+
+  DynamicJsonDocument doc(128);
+  DeserializationError err = deserializeJson(doc, it->second.jsonValue);
+  if (err) {
+    return false;
+  }
+
+  if (!doc.containsKey("latitude") || !doc.containsKey("longitude")) {
+    return false;
+  }
+
+  lat = doc["latitude"];
+  lon = doc["longitude"];
+
+  if (isnan(lat) || isnan(lon)) {
+    return false;
+  }
+
+  return true;
+}

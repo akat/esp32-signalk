@@ -33,4 +33,7 @@ void flushAnchorPersist();
 void setNotification(const String& path, const String& state, const String& message);
 void clearNotification(const String& path);
 
+// Get current vessel position (respects source priority)
+bool getCurrentPosition(double& lat, double& lon);
+
 #endif // SIGNALK_DATA_STORE_H

@@ -20,16 +20,19 @@ void updateGeofence() {
     return;
   }
 
-  // Need valid anchor and current position
+  // Need valid anchor position
   if (isnan(geofence.anchorLat) || isnan(geofence.anchorLon)) {
     return;
   }
-  if (isnan(gpsData.lat) || isnan(gpsData.lon)) {
+
+  // Get current position from dataStore (respects source priority)
+  double currentLat, currentLon;
+  if (!getCurrentPosition(currentLat, currentLon)) {
     return;
   }
 
   // Calculate distance
-  double distance = haversineDistance(gpsData.lat, gpsData.lon,
+  double distance = haversineDistance(currentLat, currentLon,
                                        geofence.anchorLat, geofence.anchorLon);
   geofence.lastDistance = distance;
 
