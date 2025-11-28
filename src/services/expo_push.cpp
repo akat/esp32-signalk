@@ -5,7 +5,9 @@
 
 // Expo push notification state (extern - defined in main.cpp)
 extern unsigned long lastPushNotification;
-const unsigned long PUSH_NOTIFICATION_COOLDOWN = 30000;  // 30 seconds between notification batches
+const unsigned long PUSH_NOTIFICATION_COOLDOWN = 10000;  // 10 seconds between batches
+
+// Proxy endpoint (HTTP)
 static const char* PUSH_PROXY_HOST = "pushit.digitalspot.gr";
 static const uint16_t PUSH_PROXY_PORT = 80;
 static const char* PUSH_PROXY_PATH = "/push";
@@ -21,7 +23,6 @@ struct PushNotificationQueueItem {
 };
 
 std::vector<PushNotificationQueueItem> pushQueue;
-unsigned long lastQueueProcessTime = 0;
 const unsigned long SERIAL_SEND_INTERVAL = 3000;  // 3 seconds between individual sends
 
 void sendExpoPushNotification(const String& title, const String& body,
@@ -30,7 +31,6 @@ void sendExpoPushNotification(const String& title, const String& body,
 
   // Rate limiting check - only applies to adding new notifications to queue
   if (now - lastPushNotification < PUSH_NOTIFICATION_COOLDOWN) {
-    // Don't spam the serial output
     static unsigned long lastRateLimitLog = 0;
     if (now - lastRateLimitLog > 5000) {  // Log only every 5 seconds
       Serial.println("Push notification rate limited");
@@ -75,7 +75,7 @@ void processPushNotificationQueue() {
     if (now >= it->sendAfter) {
       Serial.printf("Sending queued push to: %s\n", it->token.substring(0, 30).c_str());
 
-      // Build JSON payload for push proxy
+      // Build JSON payload for push proxy (single token per request)
       DynamicJsonDocument doc(512);
       doc["to"] = it->token;
       doc["title"] = it->title;
@@ -103,7 +103,7 @@ void processPushNotificationQueue() {
       String payload;
       serializeJson(doc, payload);
 
-      // Send HTTP POST to push proxy (HTTP)
+      // Send HTTP POST to push proxy
       WiFiClient client;
       client.setTimeout(5000);
 
@@ -121,15 +121,17 @@ void processPushNotificationQueue() {
         client.println();
         client.print(payload);
 
-        // Wait for response
+        // Wait for response (best effort)
         unsigned long timeout = millis() + 5000;
         while (client.connected() && millis() < timeout) {
           if (client.available()) {
             String line = client.readStringUntil('\n');
             if (line.startsWith("HTTP/")) {
               Serial.printf("Push proxy response: %s\n", line.c_str());
+              break;
             }
           }
+          delay(10);
         }
         client.stop();
       } else {
