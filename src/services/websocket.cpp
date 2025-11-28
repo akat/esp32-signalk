@@ -63,8 +63,8 @@ static bool isPathSubscribed(const ClientSubscription& sub, const String& path) 
 
 // ====== WEBSOCKET DELTA BROADCAST ======
 void broadcastDeltas() {
-  // Build delta message
-  DynamicJsonDocument doc(4096);
+  // Build delta message - reduced size to prevent memory leak
+  DynamicJsonDocument doc(2048);
   doc["context"] = "vessels." + vesselUUID;
 
   JsonArray updates = doc.createNestedArray("updates");
@@ -314,7 +314,7 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t 
     client->text(helloOutput);
 
     // Send initial state for all subscribed paths
-    DynamicJsonDocument initialDoc(4096);
+    DynamicJsonDocument initialDoc(2048);
     initialDoc["context"] = "vessels." + vesselUUID;
 
     JsonArray updates = initialDoc.createNestedArray("updates");
@@ -405,6 +405,8 @@ void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
       Serial.printf("Client ID: #%u\n", client->id());
       Serial.printf("Client IP: %s\n", client->remoteIP().toString().c_str());
       Serial.printf("Server: %s\n", server->url());
+      Serial.printf("Free Heap: %u bytes\n", ESP.getFreeHeap());
+      Serial.printf("Active Clients: %u\n", ws.count());
 
       // Note: Token extraction from URL is not available in AsyncWebSocket
       // The 6pack app sends token in URL query parameter, but we can't access it here
@@ -441,9 +443,13 @@ void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
     case WS_EVT_DISCONNECT:
       Serial.println("\n========================================");
       Serial.printf("=== WEBSOCKET: Client #%u DISCONNECTED ===\n", client->id());
+      Serial.printf("Free Heap: %u bytes\n", ESP.getFreeHeap());
+      Serial.printf("Active Clients: %u\n", ws.count());
+      Serial.printf("clientSubscriptions size: %u\n", clientSubscriptions.size());
       Serial.println("========================================\n");
       clientSubscriptions.erase(client->id());
       clientTokens.erase(client->id());  // Clean up token
+      Serial.printf("After cleanup - clientSubscriptions size: %u\n", clientSubscriptions.size());
       break;
 
     case WS_EVT_DATA:

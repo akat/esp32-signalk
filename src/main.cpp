@@ -932,6 +932,9 @@ void loop() {
   // Process WiFiManager (non-blocking)
   wm.process();
 
+  // Process push notification queue (serialized sending)
+  processPushNotificationQueue();
+
   // Check WiFi connection and reconnect if needed
   uint32_t now = millis();
 
@@ -983,6 +986,11 @@ void loop() {
   if (now - lastStatusLog > 60000) { // Every 60 seconds
     lastStatusLog = now;
     Serial.println("\n=== Status Update ===");
+    Serial.printf("Free Heap: %u bytes (%.1f KB)\n", ESP.getFreeHeap(), ESP.getFreeHeap() / 1024.0);
+    Serial.printf("Min Free Heap: %u bytes (%.1f KB)\n", ESP.getMinFreeHeap(), ESP.getMinFreeHeap() / 1024.0);
+    Serial.printf("Heap Size: %u bytes (%.1f KB)\n", ESP.getHeapSize(), ESP.getHeapSize() / 1024.0);
+    Serial.printf("Active WS Clients: %u\n", ws.count());
+    Serial.printf("Subscriptions Map Size: %u\n", clientSubscriptions.size());
     Serial.print("AP Status: ");
     Serial.println(WiFi.softAPgetStationNum() > 0 ? "Clients connected" : "No clients");
     Serial.print("WiFi Client: ");

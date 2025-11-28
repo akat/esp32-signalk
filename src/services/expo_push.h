@@ -11,4 +11,7 @@ extern const unsigned long PUSH_NOTIFICATION_COOLDOWN;
 void sendExpoPushNotification(const String& title, const String& body,
                                const String& alarmType = "", const String& data = "");
 
+// Process the push notification queue (call from main loop)
+void processPushNotificationQueue();
+
 #endif // SERVICES_EXPO_PUSH_H

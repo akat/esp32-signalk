@@ -50,7 +50,8 @@ void updateGeofence() {
       Serial.printf("GEOFENCE ALARM: %s\n", msg);
     }
 
-    // Send push notification continuously while outside (respects rate limit)
+    // Send push notification every 30 seconds while outside (handled by rate limit)
+    // The queue system will send them serially with 3-second spacing between tokens
     sendExpoPushNotification("Geofence Alert", String(msg), "geofence");
   } else if (!outside && geofence.alarmActive) {
     // Clear alarm
