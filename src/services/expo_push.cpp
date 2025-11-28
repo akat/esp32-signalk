@@ -1,11 +1,14 @@
 #include "expo_push.h"
 #include "storage.h"
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
 #include <ArduinoJson.h>
 
 // Expo push notification state (extern - defined in main.cpp)
 extern unsigned long lastPushNotification;
 const unsigned long PUSH_NOTIFICATION_COOLDOWN = 30000;  // 30 seconds between notification batches
+static const char* PUSH_PROXY_HOST = "pushit.digitalspot.gr";
+static const uint16_t PUSH_PROXY_PORT = 80;
+static const char* PUSH_PROXY_PATH = "/push";
 
 // Queue for serialized push notification sending
 struct PushNotificationQueueItem {
@@ -72,7 +75,7 @@ void processPushNotificationQueue() {
     if (now >= it->sendAfter) {
       Serial.printf("Sending queued push to: %s\n", it->token.substring(0, 30).c_str());
 
-      // Build JSON payload for Expo push API
+      // Build JSON payload for push proxy
       DynamicJsonDocument doc(512);
       doc["to"] = it->token;
       doc["title"] = it->title;
@@ -100,13 +103,16 @@ void processPushNotificationQueue() {
       String payload;
       serializeJson(doc, payload);
 
-      // Send HTTP POST to Expo push API
-      WiFiClientSecure client;
-      client.setInsecure();  // Skip certificate validation for simplicity
+      // Send HTTP POST to push proxy (HTTP)
+      WiFiClient client;
+      client.setTimeout(5000);
 
-      if (client.connect("exp.host", 443)) {
-        client.println("POST /--/api/v2/push/send HTTP/1.1");
-        client.println("Host: exp.host");
+      if (client.connect(PUSH_PROXY_HOST, PUSH_PROXY_PORT)) {
+        client.print("POST ");
+        client.print(PUSH_PROXY_PATH);
+        client.println(" HTTP/1.1");
+        client.print("Host: ");
+        client.println(PUSH_PROXY_HOST);
         client.println("Content-Type: application/json");
         client.println("Accept: application/json");
         client.print("Content-Length: ");
@@ -121,13 +127,13 @@ void processPushNotificationQueue() {
           if (client.available()) {
             String line = client.readStringUntil('\n');
             if (line.startsWith("HTTP/")) {
-              Serial.printf("Push API response: %s\n", line.c_str());
+              Serial.printf("Push proxy response: %s\n", line.c_str());
             }
           }
         }
         client.stop();
       } else {
-        Serial.println("Failed to connect to Expo push API");
+        Serial.println("Failed to connect to push proxy");
       }
 
       // Remove from queue and return (process only one per call)
