@@ -1068,7 +1068,7 @@ void loop() {
       if (c == '\n' || c == '\r') {
         if (gpsBuffer.length() > 6 && gpsBuffer[0] == '$') {
           Serial.printf("GPS RX: %s\n", gpsBuffer.c_str());
-          handleNmeaSentence(gpsBuffer, nullptr);  // GPS modules send NMEA 0183
+          handleNmeaSentence(gpsBuffer, "GPS");  // GPS modules send NMEA 0183
         }
         gpsBuffer = "";
     } else if (c >= 32 && c <= 126) {
