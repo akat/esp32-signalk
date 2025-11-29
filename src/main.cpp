@@ -143,16 +143,23 @@ String tcpBuffer = "";
 TcpClientState tcpState = TCP_DISCONNECTED;
 
 // Map source tag to dataStore source label
-static String sourceTagToLabel(const String& tag) {
+static String sourceTagToLabel(const char* sourceTag) {
+  if (sourceTag == nullptr || strlen(sourceTag) == 0) {
+    return "nmea0183.gps";  // nullptr or empty maps to GPS (default)
+  }
+
+  String tag = String(sourceTag);
   String t = tag;
   t.toLowerCase();
+
   if (t.indexOf("nmea2000") >= 0 || t.indexOf("can") >= 0) return "nmea2000.can";
   if (t.indexOf("rs485") >= 0) return "nmea0183.rs485";
   if (t.indexOf("single") >= 0) return "nmea0183.singleended";
   if (t.indexOf("seatalk") >= 0) return "seatalk1";
-  if (t.indexOf("gps") >= 0 || tag.length() == 0) return "nmea0183.GPS";  // nullptr maps to GPS
+  if (t.indexOf("gps") >= 0) return "nmea0183.gps";
   if (t.indexOf("tcp") >= 0) return "nmea0183.tcp";
-  return "nmea0183.GPS";  // default
+
+  return "nmea0183.gps";  // default
 }
 
 // Priority rank for TCP broadcast (lower = higher priority)
@@ -172,7 +179,7 @@ static int tcpPriorityRank(const String& src) {
 // Returns true if this source has the highest priority among all active sources
 bool shouldBroadcastFromSource(const char* sourceTag) {
   String tag = sourceTag ? String(sourceTag) : "";
-  String myLabel = sourceTagToLabel(tag);
+  String myLabel = sourceTagToLabel(sourceTag);
   int myRank = tcpPriorityRank(tag);
 
   // Check dataStore to find the best (lowest rank) source that has data
@@ -239,7 +246,9 @@ void handleNmeaSentence(const String& sentence, const char* sourceTag) {
   }
 
   // ALWAYS parse sentence to update SignalK data store from ALL sources
-  parseNMEASentence(sentence);
+  // Convert sourceTag to SignalK source identifier for priority system
+  String signalkSource = sourceTagToLabel(sourceTag);
+  parseNMEASentence(sentence, signalkSource);
 
   // NOTE: We do NOT forward raw sentences anymore!
   // Instead, NMEA sentences are generated from the dataStore periodically
@@ -348,7 +357,7 @@ void processTcpData() {
         if (tcpBuffer.length() > 0) {
           if (tcpBuffer[0] == '$') {
             // This is an NMEA sentence - parse it
-            handleNmeaSentence(tcpBuffer, nullptr);
+            handleNmeaSentence(tcpBuffer, "TCP Client");
           } else {
             // Non-NMEA data - just log it for debugging
             Serial.println("TCP Data (non-NMEA): " + tcpBuffer);

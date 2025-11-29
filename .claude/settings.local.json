@@ -29,7 +29,8 @@
       "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor --baud 115200)",
       "Bash(timeout:*)",
       "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device list)",
-      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor --baud 115200 --port 192.168.1.188)"
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor --baud 115200 --port 192.168.1.188)",
+      "Bash(\"C:/Users/akatsaris/.platformio/penv/Scripts/platformio.exe\" device monitor --baud 115200 --port COM4)"
     ],
     "deny": [],
     "ask": []

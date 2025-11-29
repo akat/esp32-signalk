@@ -102,7 +102,7 @@ std::vector<String> splitNMEA(const String& sentence) {
   return fields;
 }
 
-void parseNMEASentence(const String& sentence) {
+void parseNMEASentence(const String& sentence, const String& source) {
   if (sentence.length() < 7 || sentence[0] != '$') return;
 
   // Validate checksum if present (only warn, don't reject for now)
@@ -133,17 +133,17 @@ void parseNMEASentence(const String& sentence) {
       gpsData.timestamp = iso8601Now();
 
       // Only use the combined position object, not separate lat/lon paths
-      updateNavigationPosition(lat, lon, "nmea0183.GPS");
+      updateNavigationPosition(lat, lon, source);
     }
 
     if (!isnan(sog) && sog >= 0) {
       gpsData.sog = knotsToMS(sog);
-      setPathValue("navigation.speedOverGround", gpsData.sog, "nmea0183.GPS", "m/s", "Speed over ground");
+      setPathValue("navigation.speedOverGround", gpsData.sog, source, "m/s", "Speed over ground");
     }
 
     if (!isnan(cog) && cog >= 0 && cog <= 360) {
       gpsData.cog = degToRad(cog);
-      setPathValue("navigation.courseOverGroundTrue", gpsData.cog, "nmea0183.GPS", "rad", "Course over ground (true)");
+      setPathValue("navigation.courseOverGroundTrue", gpsData.cog, source, "rad", "Course over ground (true)");
     }
   }
 
@@ -163,13 +163,13 @@ void parseNMEASentence(const String& sentence) {
       gpsData.timestamp = iso8601Now();
 
       // Only use the combined position object, not separate lat/lon paths
-      setPathValue("navigation.gnss.satellitesInView", (double)sats, "nmea0183.GPS", "", "Satellites in view");
-      updateNavigationPosition(lat, lon, "nmea0183.GPS");
+      setPathValue("navigation.gnss.satellitesInView", (double)sats, source, "", "Satellites in view");
+      updateNavigationPosition(lat, lon, source);
     }
 
     if (!isnan(alt)) {
       gpsData.altitude = alt;
-      setPathValue("navigation.gnss.altitude", alt, "nmea0183.GPS", "m", "Altitude");
+      setPathValue("navigation.gnss.altitude", alt, source, "m", "Altitude");
     }
   }
 
@@ -180,12 +180,12 @@ void parseNMEASentence(const String& sentence) {
 
     if (!isnan(cog) && cog >= 0 && cog <= 360) {
       gpsData.cog = degToRad(cog);
-      setPathValue("navigation.courseOverGroundTrue", gpsData.cog, "nmea0183.GPS", "rad", "Course over ground");
+      setPathValue("navigation.courseOverGroundTrue", gpsData.cog, source, "rad", "Course over ground");
     }
 
     if (!isnan(sog) && sog >= 0) {
       gpsData.sog = knotsToMS(sog);
-      setPathValue("navigation.speedOverGround", gpsData.sog, "nmea0183.GPS", "m/s", "Speed over ground");
+      setPathValue("navigation.speedOverGround", gpsData.sog, source, "m/s", "Speed over ground");
     }
   }
 
@@ -194,7 +194,7 @@ void parseNMEASentence(const String& sentence) {
     double heading = fields[1].toDouble();
     if (!isnan(heading) && heading >= 0 && heading <= 360) {
       gpsData.heading = degToRad(heading);
-      setPathValue("navigation.headingMagnetic", gpsData.heading, "nmea0183.GPS", "rad", "Heading (magnetic)");
+      setPathValue("navigation.headingMagnetic", gpsData.heading, source, "rad", "Heading (magnetic)");
     }
   }
 
@@ -212,7 +212,7 @@ void parseNMEASentence(const String& sentence) {
       gpsData.timestamp = iso8601Now();
 
       // Only use the combined position object, not separate lat/lon paths
-      updateNavigationPosition(lat, lon, "nmea0183.GPS");
+      updateNavigationPosition(lat, lon, source);
     }
   }
 
@@ -220,7 +220,7 @@ void parseNMEASentence(const String& sentence) {
   else if (msgType.endsWith("HDM") && fields.size() >= 2) {
     double heading = fields[1].toDouble();
     if (!isnan(heading) && heading >= 0 && heading <= 360) {
-      setPathValue("navigation.headingMagnetic", degToRad(heading), "nmea0183.GPS", "rad", "Heading (magnetic)");
+      setPathValue("navigation.headingMagnetic", degToRad(heading), source, "rad", "Heading (magnetic)");
     }
   }
 
@@ -228,7 +228,7 @@ void parseNMEASentence(const String& sentence) {
   else if (msgType.endsWith("HDT") && fields.size() >= 2) {
     double heading = fields[1].toDouble();
     if (!isnan(heading) && heading >= 0 && heading <= 360) {
-      setPathValue("navigation.headingTrue", degToRad(heading), "nmea0183.GPS", "rad", "Heading (true)");
+      setPathValue("navigation.headingTrue", degToRad(heading), source, "rad", "Heading (true)");
     }
   }
 
@@ -240,13 +240,13 @@ void parseNMEASentence(const String& sentence) {
     double windSpeedMs = knotsToMS(windSpeedKnots);
 
     if (!isnan(windDirTrue) && windDirTrue >= 0 && windDirTrue <= 360) {
-      setPathValue("environment.wind.directionTrue", degToRad(windDirTrue), "nmea0183.GPS", "rad", "Wind direction (true)");
+      setPathValue("environment.wind.directionTrue", degToRad(windDirTrue), source, "rad", "Wind direction (true)");
     }
     if (!isnan(windDirMag) && windDirMag >= 0 && windDirMag <= 360) {
-      setPathValue("environment.wind.directionMagnetic", degToRad(windDirMag), "nmea0183.GPS", "rad", "Wind direction (magnetic)");
+      setPathValue("environment.wind.directionMagnetic", degToRad(windDirMag), source, "rad", "Wind direction (magnetic)");
     }
     if (!isnan(windSpeedMs) && windSpeedMs >= 0) {
-      setPathValue("environment.wind.speedTrue", windSpeedMs, "nmea0183.GPS", "m/s", "Wind speed (true)");
+      setPathValue("environment.wind.speedTrue", windSpeedMs, source, "m/s", "Wind speed (true)");
       // Trigger wind alarm monitoring
       updateWindAlarm(windSpeedMs);
     }
@@ -258,10 +258,10 @@ void parseNMEASentence(const String& sentence) {
     double drift = fields[3].toDouble();
 
     if (!isnan(set) && set >= 0 && set <= 360) {
-      setPathValue("navigation.current.setTrue", degToRad(set), "nmea0183.GPS", "rad", "Current set (true)");
+      setPathValue("navigation.current.setTrue", degToRad(set), source, "rad", "Current set (true)");
     }
     if (!isnan(drift) && drift >= 0) {
-      setPathValue("navigation.current.drift", knotsToMS(drift), "nmea0183.GPS", "m/s", "Current drift");
+      setPathValue("navigation.current.drift", knotsToMS(drift), source, "m/s", "Current drift");
     }
   }
 
@@ -273,13 +273,13 @@ void parseNMEASentence(const String& sentence) {
     double speedMs = knotsToMS(speedKnots);
 
     if (!isnan(headingTrue) && headingTrue >= 0 && headingTrue <= 360) {
-      setPathValue("navigation.headingTrue", degToRad(headingTrue), "nmea0183.GPS", "rad", "Heading (true)");
+      setPathValue("navigation.headingTrue", degToRad(headingTrue), source, "rad", "Heading (true)");
     }
     if (!isnan(headingMag) && headingMag >= 0 && headingMag <= 360) {
-      setPathValue("navigation.headingMagnetic", degToRad(headingMag), "nmea0183.GPS", "rad", "Heading (magnetic)");
+      setPathValue("navigation.headingMagnetic", degToRad(headingMag), source, "rad", "Heading (magnetic)");
     }
     if (!isnan(speedMs) && speedMs >= 0) {
-      setPathValue("navigation.speedThroughWater", speedMs, "nmea0183.GPS", "m/s", "Speed through water");
+      setPathValue("navigation.speedThroughWater", speedMs, source, "m/s", "Speed through water");
     }
   }
 
@@ -289,7 +289,7 @@ void parseNMEASentence(const String& sentence) {
     double speedMs = knotsToMS(speedKnots);
 
     if (!isnan(speedMs) && speedMs >= 0) {
-      setPathValue("navigation.speedThroughWater", speedMs, "nmea0183.GPS", "m/s", "Speed through water");
+      setPathValue("navigation.speedThroughWater", speedMs, source, "m/s", "Speed through water");
     }
   }
 
@@ -306,12 +306,12 @@ void parseNMEASentence(const String& sentence) {
     if (!isnan(windAngle) && windAngle >= 0 && windAngle <= 360 && !isnan(windSpeedMs) && windSpeedMs >= 0) {
       if (reference == "R") {
         // Relative wind
-        setPathValue("environment.wind.angleApparent", degToRad(windAngle), "nmea0183.GPS", "rad", "Apparent wind angle");
-        setPathValue("environment.wind.speedApparent", windSpeedMs, "nmea0183.GPS", "m/s", "Apparent wind speed");
+        setPathValue("environment.wind.angleApparent", degToRad(windAngle), source, "rad", "Apparent wind angle");
+        setPathValue("environment.wind.speedApparent", windSpeedMs, source, "m/s", "Apparent wind speed");
       } else if (reference == "T") {
         // True wind
-        setPathValue("environment.wind.angleTrueWater", degToRad(windAngle), "nmea0183.GPS", "rad", "True wind angle");
-        setPathValue("environment.wind.speedTrue", windSpeedMs, "nmea0183.GPS", "m/s", "True wind speed");
+        setPathValue("environment.wind.angleTrueWater", degToRad(windAngle), source, "rad", "True wind angle");
+        setPathValue("environment.wind.speedTrue", windSpeedMs, source, "m/s", "True wind speed");
         // Trigger wind alarm monitoring
         updateWindAlarm(windSpeedMs);
       }
@@ -328,7 +328,7 @@ void parseNMEASentence(const String& sentence) {
     double windSpeedMs = knotsToMS(windSpeedKnots);
 
     if (!isnan(windSpeedMs) && windSpeedMs >= 0) {
-      setPathValue("environment.wind.speedTrue", windSpeedMs, "nmea0183.GPS", "m/s", "True wind speed");
+      setPathValue("environment.wind.speedTrue", windSpeedMs, source, "m/s", "True wind speed");
       // Trigger wind alarm monitoring
       updateWindAlarm(windSpeedMs);
     }
@@ -336,7 +336,7 @@ void parseNMEASentence(const String& sentence) {
     // Use left wind angle if available, otherwise right
     double windAngle = !isnan(windAngleL) ? windAngleL : windAngleR;
     if (!isnan(windAngle) && windAngle >= 0 && windAngle <= 360) {
-      setPathValue("environment.wind.angleTrueWater", degToRad(windAngle), "nmea0183.GPS", "rad", "True wind angle");
+      setPathValue("environment.wind.angleTrueWater", degToRad(windAngle), source, "rad", "True wind angle");
     }
   }
 
@@ -346,7 +346,7 @@ void parseNMEASentence(const String& sentence) {
     double velocityMs = knotsToMS(velocityKnots);
 
     if (!isnan(velocityMs) && velocityMs >= 0) {
-      setPathValue("navigation.course.nextPoint.velocityMadeGood", velocityMs, "nmea0183.GPS", "m/s", "Velocity made good to waypoint");
+      setPathValue("navigation.course.nextPoint.velocityMadeGood", velocityMs, source, "m/s", "Velocity made good to waypoint");
     }
   }
 
@@ -360,7 +360,7 @@ void parseNMEASentence(const String& sentence) {
     if (status1 == "A" && status2 == "A" && !isnan(xteNm)) {
       double xteM = xteNm * 1852.0; // Convert nautical miles to meters
       if (direction == "L") xteM = -xteM; // Left is negative
-      setPathValue("navigation.course.crossTrackError", xteM, "nmea0183.GPS", "m", "Cross-track error");
+      setPathValue("navigation.course.crossTrackError", xteM, source, "m", "Cross-track error");
     }
   }
 
@@ -389,7 +389,7 @@ void parseNMEASentence(const String& sentence) {
     double depth = !isnan(depthMeters) ? depthMeters : (depthFeet * 0.3048);
 
     if (!isnan(depth) && depth >= 0) {
-      setPathValue("environment.depth.belowTransducer", depth, "nmea0183.GPS", "m", "Depth below transducer");
+      setPathValue("environment.depth.belowTransducer", depth, source, "m", "Depth below transducer");
       // Trigger depth alarm monitoring
       updateDepthAlarm(depth);
     }
@@ -402,7 +402,7 @@ void parseNMEASentence(const String& sentence) {
     int satellitesInView = fields[3].toInt();
 
     if (!isnan(satellitesInView) && satellitesInView >= 0) {
-      setPathValue("navigation.gnss.satellitesInView", (double)satellitesInView, "nmea0183.GPS", "", "Satellites in view");
+      setPathValue("navigation.gnss.satellitesInView", (double)satellitesInView, source, "", "Satellites in view");
     }
   }
 }

@@ -64,7 +64,8 @@ std::vector<String> splitNMEA(const String& sentence);
  * - GSV: GPS Satellites in View
  *
  * @param sentence The NMEA sentence to parse (starting with '$')
+ * @param source The data source identifier (e.g., "nmea0183.GPS", "nmea0183.tcp")
  */
-void parseNMEASentence(const String& sentence);
+void parseNMEASentence(const String& sentence, const String& source = "nmea0183.GPS");
 
 #endif // NMEA0183_H
