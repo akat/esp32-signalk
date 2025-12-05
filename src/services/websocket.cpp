@@ -3,7 +3,6 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <cmath>
-#include <vector>
 
 // ====== EXTERN DECLARATIONS ======
 // These are defined in main.cpp
@@ -79,8 +78,6 @@ void broadcastDeltas() {
   JsonArray values = update.createNestedArray("values");
 
   bool hasChanges = false;
-  std::vector<String> changedPaths;
-  changedPaths.reserve(dataStore.size());
 
   for (auto& kv : dataStore) {
     if (!kv.second.changed) continue;
@@ -129,7 +126,6 @@ void broadcastDeltas() {
     lastSentValues[kv.first] = kv.second;
     kv.second.changed = false;
     hasChanges = true;
-    changedPaths.push_back(kv.first);
   }
 
   if (!hasChanges) return;
@@ -159,7 +155,9 @@ void broadcastDeltas() {
     return;
   }
 
-  // Send to all subscribed clients immediately (no throttling)
+  // Send only the subscribed paths to each client
+  JsonArray allValues = updates[0]["values"];
+
   for (auto it = clientSubscriptions.begin(); it != clientSubscriptions.end();) {
     AsyncWebSocketClient* client = ws.client(it->first);
     if (!client) {
@@ -167,16 +165,33 @@ void broadcastDeltas() {
       continue;
     }
 
-    bool shouldSend = false;
-    for (const String& path : changedPaths) {
-      if (isPathSubscribed(it->second, path)) {
-        shouldSend = true;
-        break;
+    ClientSubscription& sub = it->second;
+
+    DynamicJsonDocument filteredDoc(2048);
+    filteredDoc["context"] = doc["context"];
+
+    JsonArray clientUpdates = filteredDoc.createNestedArray("updates");
+    JsonObject clientUpdate = clientUpdates.createNestedObject();
+    clientUpdate["timestamp"] = update["timestamp"];
+    JsonObject clientSource = clientUpdate.createNestedObject("source");
+    clientSource["label"] = source["label"];
+    clientSource["type"] = source["type"];
+
+    JsonArray clientValues = clientUpdate.createNestedArray("values");
+
+    for (JsonVariantConst valueVar : allValues) {
+      String path = valueVar["path"] | "";
+      if (path.length() == 0) continue;
+
+      if (isPathSubscribed(sub, path)) {
+        clientValues.add(valueVar);
       }
     }
 
-    if (shouldSend) {
-      client->text(output);
+    if (clientValues.size() > 0) {
+      String clientOutput;
+      serializeJson(filteredDoc, clientOutput);
+      client->text(clientOutput);
     }
     ++it;
   }
